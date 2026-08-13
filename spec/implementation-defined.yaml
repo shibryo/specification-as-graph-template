@@ -1,0 +1,10 @@
+areas:
+  - name: Persistence mechanism
+    freedom: Any persistence approach may be used.
+    fixed_semantics:
+      - Authoritative state remains unambiguous.
+
+  - name: Execution topology
+    freedom: Responsibilities may be implemented in one or multiple execution units.
+    fixed_semantics:
+      - Responsibility ownership remains semantically unambiguous.
