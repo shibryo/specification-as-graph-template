@@ -1,0 +1,29 @@
+initial_state: state.accepted
+terminal_states:
+  - state.completed
+  - state.failed
+states:
+  - id: state.accepted
+    name: Accepted
+    meaning: The Request has entered the subject's responsibility.
+  - id: state.processing
+    name: Processing
+    meaning: The Request is actively being processed.
+  - id: state.completed
+    name: Completed
+    meaning: A successful Result is externally observable.
+  - id: state.failed
+    name: Failed
+    meaning: A defined terminal failure is externally observable.
+transitions:
+  - from: state.accepted
+    to: state.processing
+    trigger: Processing begins.
+  - from: state.processing
+    to: state.completed
+    trigger: A successful Result becomes authoritative.
+  - from: state.processing
+    to: state.failed
+    trigger: A terminal failure becomes authoritative.
+normative:
+  - A Request cannot be simultaneously authoritative as both Completed and Failed.
