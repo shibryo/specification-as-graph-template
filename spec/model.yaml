@@ -1,0 +1,19 @@
+concepts:
+  - id: concept.request
+    name: Request
+    meaning: >
+      A unit of intent submitted to the subject for processing.
+    properties:
+      - Has stable identity for the duration required by the specification.
+
+  - id: concept.result
+    name: Result
+    meaning: >
+      The externally meaningful outcome of processing a Request.
+
+relationships:
+  - subject: concept.request
+    relation: produces
+    object: concept.result
+    meaning: >
+      Processing a Request may produce one Result according to the required behavior.
