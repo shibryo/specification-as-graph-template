@@ -1,0 +1,12 @@
+responsibilities:
+  - id: responsibility.processing
+    name: Request Processing
+    purpose: >
+      Own the semantic transition from an accepted Request to an externally meaningful Result.
+    owns:
+      - Determining whether a Request can be processed.
+      - Producing or exposing the resulting outcome.
+    must_not_own:
+      - Implementation choices explicitly declared implementation-defined.
+    normative:
+      - A conforming implementation MUST make processing ownership unambiguous.
