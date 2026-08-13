@@ -1,0 +1,13 @@
+failures:
+  - id: failure.processing-interrupted
+    name: Processing Interrupted
+    occurs_during:
+      - interaction.process-request
+    meaning: >
+      Processing stops before a successful terminal outcome becomes authoritative.
+    retryable: implementation-defined
+    required_behavior:
+      - Preserve enough information to avoid an ambiguous terminal outcome.
+    recovery: >
+      The implementation may retry, resume, compensate, or fail terminally, provided
+      the resulting authoritative state satisfies all invariants.
