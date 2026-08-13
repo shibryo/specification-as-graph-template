@@ -1,0 +1,35 @@
+render:
+  generated_file: SPEC.md
+  generated_notice: GENERATED FROM spec/. DO NOT EDIT DIRECTLY.
+  projection: narrative
+  principles:
+    - Resolve graph identity to semantic names in rendered prose.
+    - Assemble related records into system-level sections before rendering.
+    - Preserve the distinction between normative semantics and informative rationale.
+    - Never infer new normative requirements during rendering.
+    - Prefer connected explanations over record-by-record dumps.
+  sections:
+    - title: Problem Statement
+      strategy: intent_context
+    - title: Goals and Non-Goals
+      strategy: goals
+    - title: Design Intent
+      strategy: explain_intent
+    - title: System Model
+      strategy: assemble_model_and_ownership
+    - title: Core Interactions
+      strategy: narrative_interactions
+    - title: Lifecycle and State
+      strategy: explain_state_machine
+    - title: Interfaces and Interactions
+      strategy: explain_interfaces
+    - title: Invariants and Constraints
+      strategy: explain_invariants
+    - title: Failure and Recovery Semantics
+      strategy: explain_failure_model
+    - title: Implementation-Defined Areas
+      strategy: explain_freedom
+    - title: Reference Implementation
+      strategy: explain_reference
+    - title: Conformance
+      strategy: explain_conformance
