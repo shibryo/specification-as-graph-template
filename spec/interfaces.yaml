@@ -1,0 +1,14 @@
+interfaces:
+  - id: interface.example
+    name: Example Interface
+    purpose: Describe an externally meaningful interaction boundary.
+    input_semantics:
+      - Replace with the meaning required of valid input.
+    output_semantics:
+      - Replace with the meaning guaranteed by output.
+    failure_semantics:
+      - Replace with defined failure behavior.
+    implementation_defined:
+      - Transport
+      - Serialization
+      - Invocation mechanism
