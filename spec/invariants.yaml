@@ -1,0 +1,12 @@
+invariants:
+  - id: invariant.outcome-is-unambiguous
+    name: Outcome Is Unambiguous
+    statement: >
+      For a given logical Request, the authoritative externally observable outcome
+      does not simultaneously represent mutually exclusive terminal states.
+    intent: >
+      Consumers should not need to infer which incompatible outcome is authoritative.
+    prevents:
+      - Conflicting terminal outcomes for the same logical Request.
+    verification:
+      - Attempt conflicting terminal transitions and verify that only one becomes authoritative.
