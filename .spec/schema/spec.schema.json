@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/spec.schema.json",
+  "title": "Specification Graph Root",
+  "description": "Minimal validation contract for a specification-as-graph repository.",
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "name": {"type": "string", "minLength": 1},
+    "statement": {"type": "string", "minLength": 1},
+    "intent": {"type": ["string", "array"]},
+    "normative": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}
