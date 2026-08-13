@@ -1,0 +1,80 @@
+process:
+  - id: observe
+    purpose: Establish evidence before interpretation.
+    inputs:
+      - source code
+      - tests
+      - configuration
+      - documentation
+      - interfaces and schemas
+      - observed behavior
+      - decision records
+    outputs:
+      - observations
+
+  - id: reconstruct
+    purpose: Reconstruct the whole subject behind the evidence.
+    required_views:
+      - concepts and relationships
+      - responsibilities and ownership
+      - end-to-end interactions
+      - lifecycle and state
+      - interfaces
+      - invariants
+      - failures and recovery
+
+  - id: infer-intent
+    purpose: Infer why observed behavior exists without promoting guesses to facts.
+    rules:
+      - Inferred intent must be supported by evidence or marked uncertain.
+      - Uncertain intent must not silently become a MUST requirement.
+
+  - id: classify
+    purpose: Separate essential semantics from incidental implementation choices.
+    classes:
+      - normative
+      - implementation-defined
+      - reference-specific
+      - informative
+      - unresolved
+
+  - id: normalize
+    purpose: Encode the recovered subject as connected specification records.
+    rules:
+      - Normative statements must constrain a model element or relationship rather than form an isolated inventory.
+      - Interactions must connect participants, sequence, invariants, and failures where applicable.
+      - Lifecycle records must express semantic state rather than incidental execution state.
+
+  - id: validate
+    purpose: Detect structural gaps, lost intent, and accidental freezing of the current implementation.
+    checks:
+      - graph references resolve
+      - identifiers are unique
+      - concepts form an explicit model
+      - responsibilities participate in interactions
+      - interactions have semantic participants and an owner
+      - invariants constrain behavior rather than float independently
+      - failures are connected to interactions
+      - lifecycle states are reachable from the declared initial state
+      - under-specification review
+      - over-specification review
+      - reference implementation separation
+
+  - id: assemble
+    purpose: Reconstruct the graph into coherent system-level views before rendering prose.
+    required_views:
+      - system model overview
+      - responsibility and ownership view
+      - interaction narratives
+      - lifecycle narrative
+      - failure model
+
+  - id: render
+    purpose: Generate SPEC.md as a coherent narrative projection rather than a record dump.
+    rules:
+      - Resolve internal identifiers to semantic names in prose.
+      - Preserve normative language exactly in meaning.
+      - Explain relationships between records instead of merely listing them.
+      - Do not add normative semantics that are absent from the source graph.
+    output:
+      - SPEC.md
