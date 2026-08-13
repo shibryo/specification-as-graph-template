@@ -1,0 +1,29 @@
+interactions:
+  - id: interaction.process-request
+    name: Process Request
+    purpose: >
+      Describe the end-to-end interaction that turns an accepted Request into a Result.
+    participants:
+      - concept.request
+      - responsibility.processing
+      - concept.result
+    owner: responsibility.processing
+    trigger: A Request is accepted for processing.
+    preconditions:
+      - The Request satisfies all required validity conditions.
+    sequence:
+      - actor: responsibility.processing
+        action: Determine whether the Request can be processed under the current state and policy.
+      - actor: responsibility.processing
+        action: Perform the required semantic operation.
+      - actor: responsibility.processing
+        action: Expose the resulting outcome.
+    postconditions:
+      - The outcome is observable as either a Result or a defined failure.
+    invariants:
+      - invariant.outcome-is-unambiguous
+    failures:
+      - failure.processing-interrupted
+    requirements:
+      - level: must_not
+        statement: Complete with an ambiguous externally observable outcome.
