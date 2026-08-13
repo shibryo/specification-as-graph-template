@@ -1,0 +1,28 @@
+context: >
+  Describe the environment, assumptions, and forces needed to understand the subject.
+
+problem: >
+  Describe the problem independently of the current implementation.
+
+why_specification_exists: >
+  Explain which design knowledge, guarantees, or boundaries would otherwise be
+  lost, misunderstood, or coupled to a particular implementation.
+
+goals:
+  - Preserve the subject's intended semantics independently of implementation mechanism.
+  - Make enough of the whole system explicit that another implementation can be built.
+
+non_goals:
+  - Prescribe internal structure unless that structure is itself part of the contract.
+
+design_intents:
+  - name: Preserve semantic behavior
+    intent: >
+      Conforming implementations should be free to vary internally while preserving
+      externally meaningful behavior and the relationships between core concepts.
+    why_it_matters: >
+      Reproducing implementation details is not the same as preserving the system.
+    implications:
+      - Normative statements should describe semantics before mechanisms.
+    tradeoffs:
+      - Some implementation freedom is intentionally left unresolved by the specification.
