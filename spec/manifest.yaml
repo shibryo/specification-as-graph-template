@@ -1,0 +1,34 @@
+specification:
+  name: Example Subject
+  version: 0.1.0
+  status: draft
+  summary: >
+    Replace this example with the subject being specified. The structured files
+    under spec/ are the source of truth; SPEC.md is a generated narrative view.
+
+normative_language:
+  must: required for conformance
+  must_not: prohibited for conformance
+  should: expected unless there is a justified reason to deviate
+  should_not: normally avoided unless justified
+  may: optional
+  implementation_defined: variable within constraints stated by this specification
+  unspecified: consumers must not rely on the behavior
+
+entrypoints:
+  - intent.yaml
+  - model.yaml
+  - responsibilities.yaml
+  - interactions.yaml
+  - lifecycle.yaml
+  - interfaces.yaml
+  - invariants.yaml
+  - failures.yaml
+  - implementation-defined.yaml
+  - reference.yaml
+
+implementation_instruction: >
+  Implement a conforming realization of this specification. Preserve normative
+  semantics and design intent. Do not infer additional constraints from the
+  reference implementation. Where behavior is implementation-defined, choose a
+  reasonable mechanism that preserves all stated invariants.
