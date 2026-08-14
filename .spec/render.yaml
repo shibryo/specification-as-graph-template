@@ -8,6 +8,15 @@ render:
     - Preserve the distinction between normative semantics and informative rationale.
     - Never infer new normative requirements during rendering.
     - Prefer connected explanations over record-by-record dumps.
+  chaptering:
+    source: chapters.yaml
+    strategy: >
+      Project declared chapters in order between the System Model and the
+      implementation-freedom sections. Each chapter renders its overview
+      followed by its contained interactions, interfaces, lifecycle,
+      invariants, and failures in the declared reading order.
+    fallback: Type-ordered sections are used when no chapters are declared.
+    unassigned: Records assigned to no chapter render in a final appendix.
   sections:
     - title: Problem Statement
       strategy: intent_context

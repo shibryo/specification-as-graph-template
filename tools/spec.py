@@ -4,16 +4,18 @@ from collections import defaultdict, deque
 import argparse, sys, yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-DIR = ROOT / 'spec'
-OUT = ROOT / 'SPEC.md'
 FILES = ['manifest.yaml','intent.yaml','model.yaml','responsibilities.yaml','interactions.yaml','lifecycle.yaml','interfaces.yaml','invariants.yaml','failures.yaml','implementation-defined.yaml','reference.yaml']
+OPTIONAL_FILES = ['chapters.yaml']
 
-def load():
+def load(spec_dir):
     docs = {}
     for f in FILES:
-        p = DIR / f
-        if not p.exists(): raise SystemExit(f'missing required file: spec/{f}')
+        p = spec_dir / f
+        if not p.exists(): raise SystemExit(f'missing required file: {p}')
         docs[f] = yaml.safe_load(p.read_text()) or {}
+    for f in OPTIONAL_FILES:
+        p = spec_dir / f
+        docs[f] = (yaml.safe_load(p.read_text()) or {}) if p.exists() else {}
     return docs
 
 def all_records(docs):
@@ -42,7 +44,7 @@ def sent(v):
 def bullets(xs): return [f'- {sent(x)}' for x in xs]
 
 def validate(d):
-    idx, errors = make_index(d); ids = set(idx)
+    idx, errors = make_index(d); warnings = []; ids = set(idx)
     model = d['model.yaml']; concepts = model.get('concepts', [])
     cids = {x.get('id') for x in concepts if isinstance(x, dict)}
     rs = d['responsibilities.yaml'].get('responsibilities', [])
@@ -94,10 +96,82 @@ def validate(d):
     for x in rids-used_r: errors.append(f'whole-system: disconnected responsibility {x}')
     if len(cids)>1:
         for x in cids-used_c: errors.append(f'whole-system: disconnected concept {x}')
-    return errors
+    chapters = d['chapters.yaml'].get('chapters', [])
+    xids = {x.get('id') for x in d['interfaces.yaml'].get('interfaces', []) if isinstance(x, dict)}
+    iids = {x.get('id') for x in interactions if isinstance(x, dict)}
+    vids = {x.get('id') for x in invs if isinstance(x, dict)}
+    fids = {x.get('id') for x in fails if isinstance(x, dict)}
+    chapterable = iids | vids | fids | xids
+    assigned, life_owner = {}, None
+    for ch in chapters:
+        cid = ch.get('id')
+        if not ch.get('name'): errors.append(f'{cid}: chapter needs name')
+        contains = ch.get('contains', [])
+        if not contains: errors.append(f'{cid}: chapter needs contains')
+        for ref in contains:
+            if ref == 'lifecycle':
+                if life_owner: errors.append(f'{cid}: lifecycle already belongs to chapter {life_owner}')
+                else: life_owner = cid
+            elif ref not in chapterable: errors.append(f'{cid}: contains unknown or non-chapterable reference {ref}')
+            elif ref in assigned: errors.append(f'{ref}: record belongs to chapters {assigned[ref]} and {cid}')
+            else: assigned[ref] = cid
+    if chapters:
+        for x in sorted(chapterable - set(assigned)): warnings.append(f'{x}: not assigned to any chapter; it renders in the appendix')
+    return errors, warnings
+
+def interaction_lines(it, idx, h):
+    L = [f"{h} {it.get('name',it['id'])}",'',sent(it.get('purpose')),'']
+    ps=[label(x,idx) for x in it.get('participants',[])]
+    if ps: L += ['Participants: '+', '.join(f'**{x}**' for x in ps)+'.','']
+    if it.get('trigger'): L+=['The interaction begins when '+sent(it['trigger']).lower(),'']
+    if it.get('preconditions'): L+=['Before it begins:','']+bullets(it['preconditions'])+['']
+    if it.get('sequence'):
+        L+=['The interaction proceeds as follows:','']
+        for n,s in enumerate(it['sequence'],1): L += [f"{n}. **{label(s.get('actor',''),idx)}** {sent(s.get('action'))}"]
+        L+=['']
+    if it.get('postconditions'): L+=['On completion:','']+bullets(it['postconditions'])+['']
+    for req in it.get('requirements',[]): L += [f"- **{str(req.get('level','must')).upper().replace('_',' ')}** — {sent(req.get('statement'))}"]
+    if it.get('requirements'): L+=['']
+    if it.get('invariants'): L+=['Constrained by '+', '.join(f"**{label(x,idx)}**" for x in it['invariants'])+'.','']
+    if it.get('failures'): L+=['Defined failures: '+', '.join(f"**{label(x,idx)}**" for x in it['failures'])+'.','']
+    return L
+
+def lifecycle_lines(life, idx, h):
+    L=[]
+    if life.get('initial_state'): L += [f"The lifecycle begins in **{label(life['initial_state'],idx)}**.",'']
+    terminal=set(life.get('terminal_states',[]))
+    for s in life.get('states',[]): L += [f"- **{s.get('name',s['id'])}** — {sent(s.get('meaning'))}{' This is terminal.' if s.get('id') in terminal else ''}"]
+    L+=['',f'{h} Transitions','']
+    for t in life.get('transitions',[]): L += [f"- **{label(t['from'],idx)}** → **{label(t['to'],idx)}** when {sent(t.get('trigger')).lower()}"]
+    L+=['']
+    if life.get('normative'): L+=[f'{h} Lifecycle Constraints','']+bullets(life['normative'])+['']
+    return L
+
+def interface_lines(x, h):
+    L = [f"{h} {x.get('name',x['id'])}",'',sent(x.get('purpose')),'']
+    for title,key in [('Input semantics','input_semantics'),('Output semantics','output_semantics'),('Failure semantics','failure_semantics')]:
+        if x.get(key): L += [f'**{title}**','']+bullets(x[key])+['']
+    if x.get('implementation_defined'): L += ['Implementation-defined mechanisms:','']+bullets(x['implementation_defined'])+['']
+    return L
+
+def invariant_lines(x, h):
+    L = [f"{h} {x.get('name',x['id'])}",'',sent(x.get('statement')),'']
+    if x.get('intent'): L+=['**Intent**','',sent(x['intent']),'']
+    if x.get('prevents'): L+=['**This prevents**','']+bullets(x['prevents'])+['']
+    if x.get('verification'): L+=['**Verification**','']+bullets(x['verification'])+['']
+    return L
+
+def failure_lines(x, idx, h):
+    L = [f"{h} {x.get('name',x['id'])}",'',sent(x.get('meaning')),'']
+    if x.get('occurs_during'): L += ['Occurs during '+', '.join(f"**{label(r,idx)}**" for r in x['occurs_during'])+'.','']
+    L += [f"Retryability is **{x.get('retryable','unspecified')}**.",'']
+    if x.get('required_behavior'): L+=['**Required behavior**','']+bullets(x['required_behavior'])+['']
+    if x.get('recovery'): L+=['**Recovery**','',sent(x['recovery']),'']
+    return L
 
 def render(d):
     idx,_=make_index(d); m=d['manifest.yaml']['specification']; intent=d['intent.yaml']; model=d['model.yaml']; rs=d['responsibilities.yaml'].get('responsibilities',[]); its=d['interactions.yaml'].get('interactions',[]); life=d['lifecycle.yaml']
+    ifaces=d['interfaces.yaml'].get('interfaces',[]); invs=d['invariants.yaml'].get('invariants',[]); fails=d['failures.yaml'].get('failures',[]); chapters=d['chapters.yaml'].get('chapters',[])
     L=[f"# {m['name']} Specification",'',"> GENERATED FROM `spec/`. DO NOT EDIT DIRECTLY.",'',f"Status: {m.get('status','draft')}  ",f"Version: {m.get('version','0.1.0')}",'','---','']
     L+=['## Problem Statement','',sent(intent.get('context')),'',sent(intent.get('problem')),'']
     if intent.get('why_specification_exists'): L+=['### Why This Specification Exists','',sent(intent['why_specification_exists']),'']
@@ -118,48 +192,42 @@ def render(d):
         if r.get('owns'): L+=['It owns:','']+bullets(r['owns'])+['']
         if r.get('must_not_own'): L+=['It does not own:','']+bullets(r['must_not_own'])+['']
         if r.get('normative'): L+=['Normative ownership semantics:','']+bullets(r['normative'])+['']
-    L+=['## Core Interactions','']
-    for it in its:
-        L += [f"### {it.get('name',it['id'])}",'',sent(it.get('purpose')),'']
-        ps=[label(x,idx) for x in it.get('participants',[])]; L += ['Participants: '+', '.join(f'**{x}**' for x in ps)+'.',''] if ps else []
-        if it.get('trigger'): L+=['The interaction begins when '+sent(it['trigger']).lower(),'']
-        if it.get('preconditions'): L+=['Before it begins:','']+bullets(it['preconditions'])+['']
-        if it.get('sequence'):
-            L+=['The interaction proceeds as follows:','']
-            for n,s in enumerate(it['sequence'],1): L += [f"{n}. **{label(s.get('actor',''),idx)}** {sent(s.get('action'))}"]
-            L+=['']
-        if it.get('postconditions'): L+=['On completion:','']+bullets(it['postconditions'])+['']
-        for req in it.get('requirements',[]): L += [f"- **{str(req.get('level','must')).upper().replace('_',' ')}** — {sent(req.get('statement'))}"]
-        if it.get('requirements'): L+=['']
-        if it.get('invariants'): L+=['Constrained by '+', '.join(f"**{label(x,idx)}**" for x in it['invariants'])+'.','']
-        if it.get('failures'): L+=['Defined failures: '+', '.join(f"**{label(x,idx)}**" for x in it['failures'])+'.','']
-    L+=['## Lifecycle and State','']
-    if life.get('initial_state'): L += [f"The lifecycle begins in **{label(life['initial_state'],idx)}**.",'']
-    terminal=set(life.get('terminal_states',[]))
-    for s in life.get('states',[]): L += [f"- **{s.get('name',s['id'])}** — {sent(s.get('meaning'))}{' This is terminal.' if s.get('id') in terminal else ''}"]
-    L+=['','### Transitions','']
-    for t in life.get('transitions',[]): L += [f"- **{label(t['from'],idx)}** → **{label(t['to'],idx)}** when {sent(t.get('trigger')).lower()}"]
-    L+=['']
-    if life.get('normative'): L+=['### Lifecycle Constraints','']+bullets(life['normative'])+['']
-    L+=['## Interfaces and Interactions','']
-    for x in d['interfaces.yaml'].get('interfaces',[]):
-        L += [f"### {x.get('name',x['id'])}",'',sent(x.get('purpose')),'']
-        for title,key in [('Input semantics','input_semantics'),('Output semantics','output_semantics'),('Failure semantics','failure_semantics')]:
-            if x.get(key): L += [f'**{title}**','']+bullets(x[key])+['']
-        if x.get('implementation_defined'): L += ['Implementation-defined mechanisms:','']+bullets(x['implementation_defined'])+['']
-    L+=['## Invariants and Constraints','']
-    for x in d['invariants.yaml'].get('invariants',[]):
-        L += [f"### {x.get('name',x['id'])}",'',sent(x.get('statement')),'']
-        if x.get('intent'): L+=['**Intent**','',sent(x['intent']),'']
-        if x.get('prevents'): L+=['**This prevents**','']+bullets(x['prevents'])+['']
-        if x.get('verification'): L+=['**Verification**','']+bullets(x['verification'])+['']
-    L+=['## Failure and Recovery Semantics','']
-    for x in d['failures.yaml'].get('failures',[]):
-        L += [f"### {x.get('name',x['id'])}",'',sent(x.get('meaning')),'']
-        if x.get('occurs_during'): L += ['Occurs during '+', '.join(f"**{label(r,idx)}**" for r in x['occurs_during'])+'.','']
-        L += [f"Retryability is **{x.get('retryable','unspecified')}**.",'']
-        if x.get('required_behavior'): L+=['**Required behavior**','']+bullets(x['required_behavior'])+['']
-        if x.get('recovery'): L+=['**Recovery**','',sent(x['recovery']),'']
+    iids={x['id'] for x in its}; vids={x['id'] for x in invs}; fids={x['id'] for x in fails}; xids={x['id'] for x in ifaces}
+    if chapters:
+        assigned=set(); life_claimed=False
+        for n,ch in enumerate(chapters,1):
+            L+=[f"## {n}. {ch.get('name',ch.get('id'))}",'']
+            if ch.get('overview'): L+=[sent(ch['overview']),'']
+            for ref in ch.get('contains',[]):
+                if ref=='lifecycle':
+                    life_claimed=True
+                    L+=['### Lifecycle and State','']+lifecycle_lines(life,idx,'####')
+                elif ref in iids: L+=interaction_lines(idx[ref],idx,'###'); assigned.add(ref)
+                elif ref in vids: L+=invariant_lines(idx[ref],'###'); assigned.add(ref)
+                elif ref in fids: L+=failure_lines(idx[ref],idx,'###'); assigned.add(ref)
+                elif ref in xids: L+=interface_lines(idx[ref],'###'); assigned.add(ref)
+        if not life_claimed: L+=['## Lifecycle and State','']+lifecycle_lines(life,idx,'###')
+        rest=[x for x in its if x['id'] not in assigned]+[x for x in ifaces if x['id'] not in assigned]+[x for x in invs if x['id'] not in assigned]+[x for x in fails if x['id'] not in assigned]
+        if rest:
+            L+=['## Appendix A. Records Outside Chapters','','The following records are normative but are not assigned to any chapter.','']
+            for x in its:
+                if x['id'] not in assigned: L+=interaction_lines(x,idx,'###')
+            for x in ifaces:
+                if x['id'] not in assigned: L+=interface_lines(x,'###')
+            for x in invs:
+                if x['id'] not in assigned: L+=invariant_lines(x,'###')
+            for x in fails:
+                if x['id'] not in assigned: L+=failure_lines(x,idx,'###')
+    else:
+        L+=['## Core Interactions','']
+        for it in its: L+=interaction_lines(it,idx,'###')
+        L+=['## Lifecycle and State','']+lifecycle_lines(life,idx,'###')
+        L+=['## Interfaces and Interactions','']
+        for x in ifaces: L+=interface_lines(x,'###')
+        L+=['## Invariants and Constraints','']
+        for x in invs: L+=invariant_lines(x,'###')
+        L+=['## Failure and Recovery Semantics','']
+        for x in fails: L+=failure_lines(x,idx,'###')
     L+=['## Implementation-Defined Areas','']
     for x in d['implementation-defined.yaml'].get('areas',[]):
         L += [f"### {x.get('name','Area')}",'',sent(x.get('freedom')),'']
@@ -171,15 +239,21 @@ def render(d):
     return '\n'.join(L).rstrip()+'\n'
 
 def main():
-    p=argparse.ArgumentParser(); p.add_argument('command', choices=['validate','render','check']); cmd=p.parse_args().command
-    docs=load(); errors=validate(docs)
+    p=argparse.ArgumentParser()
+    p.add_argument('command', choices=['validate','render','check'])
+    p.add_argument('--dir', default=None, help='specification graph directory (default: <repo>/spec)')
+    args=p.parse_args()
+    spec_dir=Path(args.dir).resolve() if args.dir else ROOT/'spec'
+    out=spec_dir.parent/'SPEC.md'
+    docs=load(spec_dir); errors,warnings=validate(docs)
+    for w in warnings: print('WARNING:',w,file=sys.stderr)
     if errors:
         for e in errors: print('ERROR:',e,file=sys.stderr)
         return 1
-    if cmd=='validate': print('specification graph is valid'); return 0
+    if args.command=='validate': print('specification graph is valid'); return 0
     text=render(docs)
-    if cmd=='render': OUT.write_text(text); print('rendered SPEC.md'); return 0
-    if not OUT.exists() or OUT.read_text()!=text: print('ERROR: SPEC.md is stale; run render',file=sys.stderr); return 1
-    print('SPEC.md is up to date'); return 0
+    if args.command=='render': out.write_text(text); print(f'rendered {out}'); return 0
+    if not out.exists() or out.read_text()!=text: print(f'ERROR: {out} is stale; run render',file=sys.stderr); return 1
+    print(f'{out} is up to date'); return 0
 
 if __name__=='__main__': raise SystemExit(main())

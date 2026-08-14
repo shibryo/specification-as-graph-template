@@ -30,15 +30,23 @@ Explain which design knowledge, guarantees, or boundaries would otherwise be los
 
 ## Design Intent
 
-### Preserve Semantic Behavior
+### Preserve semantic behavior
 
 Conforming implementations should be free to vary internally while preserving externally meaningful behavior and the relationships between core concepts.
 
-The specification therefore describes concepts, responsibilities, interactions, lifecycle, invariants, failure semantics, and implementation freedom as one connected model rather than as a flat list of requirements.
+**Why it matters**
+
+Reproducing implementation details is not the same as preserving the system.
+
+**Implications**
+
+- Normative statements should describe semantics before mechanisms.
+
+**Trade-offs**
+
+- Some implementation freedom is intentionally left unresolved by the specification.
 
 ## System Model
-
-The example model is organized around a **Request** and a **Result**. The **Request Processing** responsibility owns the semantic transition between them. **Process Request** expresses the primary end-to-end interaction.
 
 ### Core Concepts
 
@@ -46,107 +54,174 @@ The example model is organized around a **Request** and a **Result**. The **Requ
 
 A unit of intent submitted to the subject for processing.
 
+- Has stable identity for the duration required by the specification.
+
 #### Result
 
 The externally meaningful outcome of processing a Request.
 
+
 ### Concept Relationships
 
-**Request** produces **Result**. The exact implementation mechanism is not part of the conceptual relationship.
+**Request** produces **Result**. Processing a Request may produce one Result according to the required behavior.
 
 ### Responsibilities and Ownership
 
 #### Request Processing
 
-Request Processing owns the semantic decision about how an accepted Request becomes an externally meaningful Result.
+Own the semantic transition from an accepted Request to an externally meaningful Result.
 
 It owns:
 
-- determining whether a Request can be processed;
-- producing or exposing the resulting outcome.
+- Determining whether a Request can be processed.
+- Producing or exposing the resulting outcome.
 
-It does not own implementation choices explicitly declared implementation-defined.
+It does not own:
 
-A conforming implementation MUST keep this semantic ownership unambiguous even when physical components are split or combined differently.
+- Implementation choices explicitly declared implementation-defined.
 
-## Core Interactions
+Normative ownership semantics:
+
+- A conforming implementation MUST make processing ownership unambiguous.
+
+## 1. Request Processing
+
+How a Request becomes a Result: the end-to-end flow, the interface it is submitted through, the guarantees the flow must uphold, its lifecycle, and how it behaves when processing is interrupted.
 
 ### Process Request
 
-When a Request is accepted, Request Processing evaluates it, applies the intended semantic operation, and exposes the resulting outcome.
+Describe the end-to-end interaction that turns an accepted Request into a Result.
 
-Participants are **Request**, **Request Processing**, and **Result**.
+Participants: **Request**, **Request Processing**, **Result**.
+
+The interaction begins when a request is accepted for processing.
+
+Before it begins:
+
+- The Request satisfies all required validity conditions.
 
 The interaction proceeds as follows:
 
-1. **Request Processing** evaluates the Request against the applicable state and policy.
-2. **Request Processing** applies the intended semantic operation.
-3. **Request Processing** exposes the resulting outcome.
+1. **Request Processing** Determine whether the Request can be processed under the current state and policy.
+2. **Request Processing** Perform the required semantic operation.
+3. **Request Processing** Expose the resulting outcome.
 
-The outcome MUST remain unambiguous. The interaction is constrained by **Outcome Is Unambiguous** and may encounter **Processing Interrupted**.
+On completion:
 
-## Lifecycle and State
+- The outcome is observable as either a Result or a defined failure.
 
-The lifecycle begins in **Accepted**.
+- **MUST NOT** — Complete with an ambiguous externally observable outcome.
 
-- **Accepted** — the Request has entered the subject's responsibility.
-- **Processing** — the Request is actively being processed.
-- **Completed** — a successful Result is authoritative and externally observable.
-- **Failed** — a defined terminal failure is authoritative and externally observable.
+Constrained by **Outcome Is Unambiguous**.
 
-### Transitions
-
-- **Accepted** → **Processing** when processing begins.
-- **Processing** → **Completed** when a successful Result becomes authoritative.
-- **Processing** → **Failed** when a terminal failure becomes authoritative.
-
-A Request MUST NOT be simultaneously authoritative as both Completed and Failed.
-
-## Interfaces and Interactions
+Defined failures: **Processing Interrupted**.
 
 ### Example Interface
 
-The interface describes an externally meaningful interaction boundary.
+Describe an externally meaningful interaction boundary.
 
-Its specification defines the meaning required of input, the meaning guaranteed by output, and defined failure behavior. Transport, serialization, and invocation mechanism are implementation-defined unless a concrete specification intentionally makes one of them normative.
+**Input semantics**
 
-## Invariants and Constraints
+- Replace with the meaning required of valid input.
+
+**Output semantics**
+
+- Replace with the meaning guaranteed by output.
+
+**Failure semantics**
+
+- Replace with defined failure behavior.
+
+Implementation-defined mechanisms:
+
+- Transport.
+- Serialization.
+- Invocation mechanism.
+
+### Lifecycle and State
+
+The lifecycle begins in **Accepted**.
+
+- **Accepted** — The Request has entered the subject's responsibility.
+- **Processing** — The Request is actively being processed.
+- **Completed** — A successful Result is externally observable. This is terminal.
+- **Failed** — A defined terminal failure is externally observable. This is terminal.
+
+#### Transitions
+
+- **Accepted** → **Processing** when processing begins.
+- **Processing** → **Completed** when a successful result becomes authoritative.
+- **Processing** → **Failed** when a terminal failure becomes authoritative.
+
+#### Lifecycle Constraints
+
+- A Request cannot be simultaneously authoritative as both Completed and Failed.
 
 ### Outcome Is Unambiguous
 
 For a given logical Request, the authoritative externally observable outcome does not simultaneously represent mutually exclusive terminal states.
 
-This invariant exists so consumers do not need to infer which incompatible outcome is authoritative.
+**Intent**
 
-## Failure and Recovery Semantics
+Consumers should not need to infer which incompatible outcome is authoritative.
+
+**This prevents**
+
+- Conflicting terminal outcomes for the same logical Request.
+
+**Verification**
+
+- Attempt conflicting terminal transitions and verify that only one becomes authoritative.
 
 ### Processing Interrupted
 
-Processing Interrupted means processing stops before a successful terminal outcome becomes authoritative.
+Processing stops before a successful terminal outcome becomes authoritative.
 
-The implementation must preserve enough information to avoid an ambiguous terminal outcome. Retry, resume, compensation, or terminal failure may be implementation-defined, but the resulting state must satisfy all invariants.
+Occurs during **Process Request**.
+
+Retryability is **implementation-defined**.
+
+**Required behavior**
+
+- Preserve enough information to avoid an ambiguous terminal outcome.
+
+**Recovery**
+
+The implementation may retry, resume, compensate, or fail terminally, provided the resulting authoritative state satisfies all invariants.
 
 ## Implementation-Defined Areas
 
-Implementation-defined decisions may vary between conforming implementations, but they do not relax fixed semantics.
+### Persistence mechanism
 
-Examples include persistence mechanism and execution topology. Different choices are conforming only when responsibility ownership, authoritative state, interactions, lifecycle semantics, and invariants remain equivalent at the specification boundary.
+Any persistence approach may be used.
+
+Fixed semantics:
+
+- Authoritative state remains unambiguous.
+
+### Execution topology
+
+Responsibilities may be implemented in one or multiple execution units.
+
+Fixed semantics:
+
+- Responsibility ownership remains semantically unambiguous.
 
 ## Reference Implementation
 
-A reference implementation may demonstrate one valid realization of this specification. It is **not normative** and does not silently add requirements.
+Describe the current or example implementation here if one exists. It is one realization of the specification and does not silently add normative requirements.
 
-Where the reference implementation and normative specification differ, the specification is authoritative.
+The reference implementation is **not normative**; it is one realization of this specification.
 
 ## Conformance
 
+Implement a conforming realization of this specification. Preserve normative semantics and design intent. Do not infer additional constraints from the reference implementation. Where behavior is implementation-defined, choose a reasonable mechanism that preserves all stated invariants.
+
 A conforming implementation:
 
-- satisfies applicable normative statements;
-- preserves the conceptual relationships and responsibility boundaries expressed by the system model;
-- implements the defined interactions and lifecycle semantics;
-- preserves all invariants and defined failure behavior;
-- may choose different mechanisms wherever implementation freedom is declared;
+- satisfies applicable normative semantics.
+- preserves conceptual relationships and responsibility boundaries.
+- implements the defined interactions and lifecycle semantics.
+- preserves invariants and defined failure behavior.
+- may choose different mechanisms where implementation freedom is declared.
 - does not treat reference-specific choices as additional requirements.
-
-The target abstraction is reached when two substantially different implementations can both conform while preserving the same meaning and behavior at the specification boundary.

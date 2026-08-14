@@ -22,6 +22,7 @@ The graph is intentionally centered on the subject model rather than a flat requ
 - **Implementation freedom is explicit.** A specification states what must remain true while identifying mechanisms that may vary.
 - **Reference implementations are not the specification.** Existing code may demonstrate one conforming realization without silently becoming normative.
 - **SPEC.md is a narrative projection.** Rendering resolves graph references into names and reconstructs a coherent system-level explanation rather than dumping records.
+- **Chapters cut the narrative by subject domain.** When the subject spans more than one domain, `spec/chapters.yaml` groups interactions, interfaces, invariants, failures, and the lifecycle into reader-facing chapters. Type-ordered sections are only the fallback for single-topic subjects.
 
 ## Repository structure
 
@@ -42,6 +43,9 @@ spec/
   failures.yaml
   implementation-defined.yaml
   reference.yaml
+  chapters.yaml        Optional subject-domain chapter layer
+examples/
+  symphony-scheduling/ Worked example: a spec recovered from an existing codebase
 AGENTS.md              Mandatory agent behavior
 SPEC.md                Generated specification
 requirements.txt       Renderer dependency
@@ -77,11 +81,24 @@ make render
 make check
 ```
 
-`make validate` checks graph integrity and whole-system structure. It intentionally rejects several forms of disconnected specification data, such as unreachable lifecycle states, unreferenced invariants, failures that are not connected to interactions, or responsibilities that do not participate in end-to-end behavior.
+`make validate` checks graph integrity and whole-system structure. It intentionally rejects several forms of disconnected specification data, such as unreachable lifecycle states, unreferenced invariants, failures that are not connected to interactions, or responsibilities that do not participate in end-to-end behavior. When chapters are declared, it also rejects unresolved or duplicated chapter membership and warns about records that belong to no chapter.
 
 `make render` regenerates `SPEC.md`.
 
 `make check` fails when `SPEC.md` is stale.
+
+The tools work as a function over any specification graph directory: pass `DIR=<path>` (or `--dir <path>` to `tools/spec.py`) to validate and render another subject, e.g. a spec recovered from an existing codebase. `SPEC.md` is written next to the given directory.
+
+## Worked example
+
+`examples/symphony-scheduling/` demonstrates the template applied as a function to an existing implementation: the scheduling/orchestration subsystem of [openai/symphony](https://github.com/openai/symphony) was recovered from its Elixir source alone (without reading its hand-written SPEC.md) into a specification graph, then validated and rendered:
+
+```bash
+make validate DIR=examples/symphony-scheduling/spec
+make render   DIR=examples/symphony-scheduling/spec
+```
+
+The rendered `examples/symphony-scheduling/SPEC.md` projects four subject-domain chapters (state machine; polling, scheduling, and dispatch; retry and reconciliation; workspace management and safety), each assembling its interactions, interfaces, lifecycle, invariants, and failure semantics in reading order.
 
 ## What a complete specification should make possible
 

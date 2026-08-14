@@ -21,7 +21,8 @@ Do not document the implementation. Recover and specify the subject behind the i
 9. Separate essential semantics from implementation-specific or reference-specific choices.
 10. Attach normative statements to the model element they constrain.
 11. Do not create an unstructured requirements list as the primary specification model.
-12. Run validation before rendering and regenerate `SPEC.md` after accepted changes.
+12. Group behavior records into subject-domain chapters (`spec/chapters.yaml`) when the subject spans more than one domain.
+13. Run validation before rendering and regenerate `SPEC.md` after accepted changes.
 
 ## Narrative integrity rule
 
@@ -40,6 +41,8 @@ The renderer MUST NOT degrade into concatenating records in storage order. It mu
 - implementation-defined freedom;
 - reference implementation relationship;
 - conformance expectations.
+
+Chapter structure is part of narrative integrity. When the subject spans more than one domain, the graph MUST declare subject-domain chapters (`spec/chapters.yaml`) that group interactions, interfaces, invariants, and failures — and, where it belongs to one domain, the lifecycle — by theme, in reading order. The renderer projects chapters in declared order; records assigned to no chapter fall to an appendix and are reported by validation. Type-ordered projection is acceptable only for single-topic subjects.
 
 Identifiers used by `spec/` are internal graph identity. The rendered specification SHOULD prefer semantic names and prose unless an identifier itself is necessary for external traceability.
 

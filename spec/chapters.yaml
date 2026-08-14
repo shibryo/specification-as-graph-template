@@ -1,0 +1,20 @@
+# Optional subject-domain chapter layer.
+#
+# Chapters group behavior records (interactions, interfaces, invariants,
+# failures, and optionally the literal token `lifecycle`) into the order a
+# reader should encounter them. Concepts and responsibilities stay in the
+# global System Model section. When this file is absent or empty, the
+# renderer falls back to type-ordered sections.
+chapters:
+  - id: chapter.request-processing
+    name: Request Processing
+    overview: >
+      How a Request becomes a Result: the end-to-end flow, the interface it is
+      submitted through, the guarantees the flow must uphold, its lifecycle,
+      and how it behaves when processing is interrupted.
+    contains:
+      - interaction.process-request
+      - interface.example
+      - lifecycle
+      - invariant.outcome-is-unambiguous
+      - failure.processing-interrupted

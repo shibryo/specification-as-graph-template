@@ -44,6 +44,7 @@ process:
       - Normative statements must constrain a model element or relationship rather than form an isolated inventory.
       - Interactions must connect participants, sequence, invariants, and failures where applicable.
       - Lifecycle records must express semantic state rather than incidental execution state.
+      - Behavior records must be grouped into subject-domain chapters when the subject spans more than one domain.
 
   - id: validate
     purpose: Detect structural gaps, lost intent, and accidental freezing of the current implementation.
@@ -56,6 +57,7 @@ process:
       - invariants constrain behavior rather than float independently
       - failures are connected to interactions
       - lifecycle states are reachable from the declared initial state
+      - chapter references resolve and every behavior record belongs to exactly one chapter when chapters are declared
       - under-specification review
       - over-specification review
       - reference implementation separation
@@ -65,6 +67,7 @@ process:
     required_views:
       - system model overview
       - responsibility and ownership view
+      - subject-domain chapters
       - interaction narratives
       - lifecycle narrative
       - failure model
@@ -75,6 +78,7 @@ process:
       - Resolve internal identifiers to semantic names in prose.
       - Preserve normative language exactly in meaning.
       - Explain relationships between records instead of merely listing them.
+      - Project subject-domain chapters in declared order and place unassigned records in an appendix.
       - Do not add normative semantics that are absent from the source graph.
     output:
       - SPEC.md
