@@ -1,0 +1,72 @@
+areas:
+  - name: Execution and concurrency model
+    freedom: >
+      The orchestrator may be a single serialized process, multiple
+      cooperating processes, or any other topology; run supervision may use
+      any process-monitoring or job-control mechanism.
+    fixed_semantics:
+      - Scheduling admission behaves as a single decision authority; concurrent admissions cannot jointly exceed a limit.
+      - Every run ending is observed and resolved to exactly one supervised outcome.
+
+  - name: Timer and cadence mechanism
+    freedom: >
+      Polling, retry due-times, and stall measurement may use any clock and
+      timer facility. Guarding against stale timer firings (tokens,
+      generation counters, cancellation) is a mechanism choice.
+    fixed_semantics:
+      - The next scheduling pass is measured from the completion of the previous pass.
+      - A superseded or cancelled retry schedule has no effect when its timer fires.
+      - Stall elapsed time is measured against the run's last observed activity, falling back to run start.
+
+  - name: Backoff curve shape
+    freedom: >
+      The exact growth function for failure retry delays (exponential base,
+      initial delay, jitter) is free.
+    fixed_semantics:
+      - Delays are positive, non-decreasing in attempt number, and capped at the operator-configured maximum backoff.
+      - The post-completion continuation check uses a short fixed delay, materially shorter than failure backoff, and does not advance the failure attempt count.
+
+  - name: Worker host selection tie-breaking
+    freedom: >
+      Among hosts with available capacity, any load-balancing choice and any
+      deterministic or randomized tie-break is acceptable when no affinity
+      preference applies.
+    fixed_semantics:
+      - A preferred (previously used) host with available capacity is chosen over balancing.
+      - A host at its per-host limit is never chosen.
+      - When remote hosts are configured and none has capacity, no dispatch occurs.
+
+  - name: Dispatch ordering encoding
+    freedom: >
+      How priority values, missing priorities, and missing creation times are
+      encoded into a sort is free, as is the identifier tiebreak's collation.
+    fixed_semantics:
+      - More urgent priority is dispatched before less urgent; issues without a recognized priority come after all prioritized issues.
+      - Within equal priority, earlier-created issues come first; issues without a creation time come last.
+      - The final tiebreak is deterministic across passes.
+
+  - name: Workspace storage and remote transport
+    freedom: >
+      Local filesystem layout under the root, the remote-execution transport
+      (SSH or otherwise), shell quoting strategy, and the collision
+      discriminator's construction (hash function, length) are free.
+    fixed_semantics:
+      - Workspace identity remains a deterministic, collision-free pure function of the issue identifier.
+      - Containment validation (root membership, root inequality, symlink-escape rejection) is enforced before destructive operations.
+      - Remote provisioning yields an unambiguous created-versus-reused answer or fails.
+
+  - name: Configuration source and reload
+    freedom: >
+      Where configuration lives (file, service), its format, and how changes
+      are detected are free.
+    fixed_semantics:
+      - Cadence and capacity settings are re-read so operator changes take effect without restart, no later than the next scheduling pass.
+      - Invalid or missing configuration fails a scheduling pass safely (no dispatch, existing runs untouched) with a diagnosable reason.
+
+  - name: Observability depth
+    freedom: >
+      Additional metrics (token accounting, rate-limit visibility, session
+      details) beyond the required snapshot views may be collected and
+      exposed in any form.
+    fixed_semantics:
+      - The snapshot's run, retry, blocked, and polling views reflect actual orchestration state; observability reads never mutate it.

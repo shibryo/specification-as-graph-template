@@ -1,0 +1,60 @@
+reference_implementation:
+  normative: false
+  summary: >
+    The reference implementation is the Elixir orchestrator in the Symphony
+    repository (elixir/lib/symphony_elixir/), a single GenServer
+    (SymphonyElixir.Orchestrator) that serializes all scheduling decisions,
+    supervises agent runs as monitored tasks under a Task.Supervisor, and
+    delegates tracker access, workspace management, and configuration to
+    sibling modules. It realizes this specification but adds no normative
+    requirements; mechanisms listed below are reference-specific choices.
+  mapping:
+    - specification: responsibility.scheduling
+      reference: >
+        SymphonyElixir.Orchestrator, tick/poll-cycle messages, maybe_dispatch,
+        sort_issues_for_dispatch, should_dispatch_issue?, available_slots,
+        state_slots_available?, select_worker_host.
+    - specification: responsibility.run-supervision
+      reference: >
+        SymphonyElixir.Orchestrator, process monitors (handle DOWN),
+        handle_agent_down, schedule_issue_retry, retry_delay,
+        reconcile_stalled_running_issues, block_issue_from_entry.
+    - specification: responsibility.reconciliation
+      reference: >
+        SymphonyElixir.Orchestrator, reconcile_running_issues,
+        reconcile_blocked_issues, reconcile_missing_*_issue_ids,
+        terminate_running_issue, release_issue_claim.
+    - specification: responsibility.workspace-management
+      reference: >
+        SymphonyElixir.Workspace, create_for_issue, workspace_key,
+        validate_workspace_path, remove/remove_recorded/remove_issue_workspaces,
+        hook runners; SymphonyElixir.PathSafety for canonicalization.
+    - specification: interface.tracker-read
+      reference: >
+        SymphonyElixir.Tracker behaviour, fetch_issues_by_states/1 and
+        fetch_issues_by_ids/1, with adapters for Asana, GitHub, GitLab, Jira,
+        Linear, and an in-memory test tracker; SymphonyElixir.Tracker.Issue as
+        the normalized snapshot.
+    - specification: interface.orchestrator-observability
+      reference: >
+        Orchestrator.snapshot/0-2 and request_refresh/0-1 GenServer calls,
+        consumed by SymphonyElixir.StatusDashboard.
+    - specification: interface.workspace-hooks
+      reference: >
+        hooks.after_create / before_run / after_run / before_remove commands
+        from WORKFLOW.md, executed via sh -lc locally or over SSH remotely
+        with hooks.timeout_ms.
+  reference_specific_choices:
+    - Single-process GenServer serialization of all orchestration state; agent runs as Task.Supervisor children observed via Process.monitor.
+    - Default polling interval 30s; the next tick is scheduled after the poll cycle completes, with a small fixed delay (20ms) between tick and cycle start so the dashboard can render a "checking" transition.
+    - Failure backoff is exponential doubling from a 10s base (10s, 20s, 40s, ...), exponent capped at 2^10, bounded by agent.max_retry_backoff_ms (default 300s); the continuation check delay is fixed at 1s.
+    - Stall timeout default 300s (codex.stall_timeout_ms; 0 disables); stall clock uses the last Codex event timestamp, falling back to run start.
+    - Default capacity, agent.max_concurrent_agents 10, per-state overrides via agent.max_concurrent_agents_by_state, per-host limit via worker.max_concurrent_agents_per_host.
+    - Input-required detection keys on Codex events (:turn_input_required, :approval_required), completion outcomes (input_required, needs_input, approval_required), and the MCP method "mcpServer/elicitation/request".
+    - Dispatch order encodes priority ranks 1..4 ascending with unknown priority ranked 5, then created_at in microseconds (missing sorts last via a sentinel), then identifier string order.
+    - Worker host balancing picks the minimum (running-count, configured-index) pair, so ties break toward the earlier-configured host.
+    - Workspace keys sanitize identifiers to [a-zA-Z0-9._-] and, when sanitization changed the identifier, append "--" plus the first 16 hex characters of the identifier's SHA-256.
+    - Remote workspaces are managed over SSH with a tab-delimited marker line protocol to report created-versus-reused; remote paths honor a leading "~" as $HOME.
+    - Configuration lives in WORKFLOW.md front matter (WorkflowStore), re-read each tick and force-reloaded (validated) before each dispatch pass; Linear-style defaults for active ("Todo", "In Progress") and terminal ("Closed", "Cancelled", "Canceled", "Duplicate", "Done") states.
+    - Retry timers and poll ticks carry make_ref() tokens so cancelled or superseded timers are ignored when they fire; observability additionally aggregates Codex token usage and rate-limit reports from worker updates.
+    - Issues whose issue tracker marks them not dispatchable (e.g. missing assignment to the automation user) are excluded via Issue.routable?/2, which also requires all tracker.required_labels case-insensitively.

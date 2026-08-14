@@ -1,0 +1,477 @@
+interactions:
+  - id: interaction.poll-and-dispatch
+    name: Poll and Dispatch Tick
+    purpose: >
+      The recurring scheduling pass, reconcile local state with the tracker,
+      discover currently eligible issues, and start agent runs for as many of
+      them as capacity allows, in priority order.
+    participants:
+      - responsibility.scheduling
+      - responsibility.reconciliation
+      - concept.tracker
+      - concept.issue
+      - concept.agent-run
+      - concept.worker-host
+    owner: responsibility.scheduling
+    trigger: >
+      The polling cadence elapses, or an operator explicitly requests an
+      immediate scheduling pass.
+    preconditions:
+      - Orchestration configuration is loadable and names a supported tracker.
+    sequence:
+      - actor: responsibility.scheduling
+        action: >
+          Refresh effective configuration so cadence and capacity changes made
+          by the operator take effect on this pass without a restart.
+      - actor: responsibility.reconciliation
+        action: >
+          Reconcile all live runs and all blocked issues against fresh tracker
+          state before any new dispatch decision is made (see the two
+          reconciliation interactions).
+      - actor: concept.tracker
+        action: >
+          Report the issues currently in the configured active workflow
+          states.
+      - actor: responsibility.scheduling
+        action: >
+          Order the reported issues for dispatch, more urgent priority first,
+          then earlier creation time, then a deterministic identifier
+          tiebreak; issues without a known priority order after all
+          prioritized issues, and issues without a creation time order last
+          within their priority.
+      - actor: responsibility.scheduling
+        action: >
+          For each ordered issue, admit it only if it is a dispatch candidate
+          (routable, active, non-terminal, well-formed), is not already
+          claimed, running, or blocked, and admitting it keeps the run count
+          within the global limit, the limit for the issue's workflow state,
+          and worker-host capacity.
+      - actor: concept.agent-run
+        action: >
+          Come into existence for each admitted issue via the Dispatch Issue
+          interaction; each dispatch consumes capacity immediately so later
+          candidates in the same pass see the reduced availability.
+      - actor: concept.worker-host
+        action: >
+          Account the placed runs against per-host capacity for subsequent
+          admission decisions.
+      - actor: responsibility.scheduling
+        action: >
+          Schedule the next pass one polling interval after this pass
+          completes, and coalesce operator refresh requests that arrive while
+          a pass is in progress or already due.
+    postconditions:
+      - Every started run corresponds to a distinct issue that was a valid dispatch candidate at dispatch time.
+      - The next scheduling pass is scheduled; the cadence continues even when this pass failed or dispatched nothing.
+    invariants:
+      - invariant.single-run-per-issue
+      - invariant.concurrency-limits
+    failures:
+      - failure.tracker-unavailable
+    requirements:
+      - level: must
+        statement: Reconcile existing runs and blocked issues before admitting new work in the same pass.
+      - level: must
+        statement: Continue the polling cadence after a failed pass; one failure never stops future passes.
+      - level: must_not
+        statement: Dispatch an issue whose snapshot fails candidate validation, even if the tracker returned it for an active state.
+      - level: should
+        statement: Apply configuration changes (interval, limits) no later than the next pass without restarting.
+
+  - id: interaction.dispatch-issue
+    name: Dispatch Issue
+    purpose: >
+      Start one agent run for one issue, revalidating freshness against the
+      tracker, choosing a worker host, provisioning the issue's workspace, and
+      recording the claim and run so supervision can begin.
+    participants:
+      - responsibility.scheduling
+      - responsibility.workspace-management
+      - concept.issue
+      - concept.tracker
+      - concept.agent-run
+      - concept.workspace
+      - concept.worker-host
+    owner: responsibility.scheduling
+    trigger: >
+      A scheduling pass admits an issue, or a due retry re-admits one.
+    preconditions:
+      - The issue passed admission (candidate checks, claim absence, capacity) in the triggering pass.
+    sequence:
+      - actor: concept.tracker
+        action: >
+          Answer a fresh read of the issue by identity, immediately before the
+          run starts.
+      - actor: responsibility.scheduling
+        action: >
+          Abort the dispatch without error if the fresh snapshot is missing or
+          no longer a dispatch candidate; abort and surface the condition if
+          the freshness read itself failed.
+      - actor: concept.worker-host
+        action: >
+          Provide a placement, the preferred (previously used) host when it
+          has capacity, otherwise a host with capacity chosen to balance load;
+          when remote hosts are configured but none has capacity, the
+          dispatch does not proceed.
+      - actor: responsibility.workspace-management
+        action: >
+          Provide the issue's workspace on the chosen placement (see
+          Provision Workspace), reusing it if it already exists.
+      - actor: concept.agent-run
+        action: >
+          Start in the workspace, initialized with the fresh issue snapshot,
+          the placement, the retry attempt number (if this dispatch is a
+          retry), and a start timestamp.
+      - actor: responsibility.scheduling
+        action: >
+          Record the run and the issue's claim atomically with respect to
+          other scheduling decisions, and clear any pending retry schedule
+          for the issue.
+    postconditions:
+      - Exactly one live run exists for the issue, and the issue is claimed.
+      - Supervision has enough recorded context (attempt, placement, start time) to classify any later ending of the run.
+    invariants:
+      - invariant.single-run-per-issue
+      - invariant.concurrency-limits
+      - invariant.dispatch-freshness
+    failures:
+      - failure.spawn-failure
+      - failure.workspace-provisioning-failed
+    requirements:
+      - level: must
+        statement: Revalidate the issue against the tracker between admission and run start, and dispatch only the fresh snapshot.
+      - level: must_not
+        statement: Treat a skipped dispatch (stale, missing, or unplaceable issue) as an error that stops the scheduling pass.
+      - level: must
+        statement: Honor placement affinity, prefer the worker host a previous run of this issue used when it has capacity.
+
+  - id: interaction.handle-run-completion
+    name: Handle Run Ending
+    purpose: >
+      Translate the ending of an agent run into exactly one supervised
+      outcome, a prompt continuation check after normal completion, a
+      backoff retry after failure, or a blocked-issue record when the run
+      required operator input.
+    participants:
+      - responsibility.run-supervision
+      - concept.agent-run
+      - concept.issue
+      - concept.retry-schedule
+      - concept.blocked-issue
+    owner: responsibility.run-supervision
+    trigger: The process executing an agent run exits, normally or abnormally.
+    sequence:
+      - actor: responsibility.run-supervision
+        action: >
+          Remove the run from live-run accounting (freeing its capacity) and
+          capture its final recorded context, identity, placement, attempt,
+          last observed activity.
+      - actor: concept.agent-run
+        action: >
+          Yield its classification, whether its last observed activity marks
+          it as requiring operator input, and whether the exit was normal.
+      - actor: concept.blocked-issue
+        action: >
+          Come into existence, preserving the claim and diagnostic context,
+          when the run required operator input — regardless of whether the
+          exit was normal or abnormal.
+      - actor: concept.retry-schedule
+        action: >
+          Come into existence otherwise, after a normal exit, a continuation
+          check with a short fixed delay at attempt one; after an abnormal
+          exit, a failure retry whose attempt continues the run's attempt
+          history and whose delay grows with the attempt, carrying the error
+          description and the run's placement affinity.
+      - actor: concept.issue
+        action: >
+          Remain claimed in every outcome; the ending of a run never releases
+          the issue back to open competition by itself.
+    postconditions:
+      - The run no longer occupies any capacity.
+      - The issue is in exactly one of, blocked, or awaiting a scheduled re-evaluation.
+    invariants:
+      - invariant.backoff-bounded
+      - invariant.blocked-not-retried
+    failures:
+      - failure.agent-run-crash
+      - failure.input-required
+    requirements:
+      - level: must
+        statement: Treat a normal exit as a trigger for a prompt tracker re-check, not as evidence the issue is finished.
+      - level: must
+        statement: Give the input-required classification precedence over both the normal and abnormal outcome paths.
+      - level: must_not
+        statement: Lose the attempt count, error context, or placement affinity when converting a run ending into a retry schedule.
+
+  - id: interaction.retry-issue
+    name: Retry Evaluation
+    purpose: >
+      When a retry schedule comes due, decide from fresh tracker state and
+      current capacity whether to re-dispatch the issue, release it, clean up
+      after it, or defer again.
+    participants:
+      - responsibility.run-supervision
+      - responsibility.scheduling
+      - responsibility.workspace-management
+      - concept.retry-schedule
+      - concept.issue
+      - concept.tracker
+      - concept.workspace
+    owner: responsibility.run-supervision
+    trigger: An issue's retry schedule becomes due.
+    preconditions:
+      - The due schedule is the issue's current one; superseded or cancelled schedules have no effect when they fire.
+    sequence:
+      - actor: concept.retry-schedule
+        action: Fire, surrendering its attempt number and preserved context to the evaluation.
+      - actor: concept.tracker
+        action: Answer a fresh read of the issue by identity.
+      - actor: responsibility.run-supervision
+        action: >
+          If the read failed, defer, schedule the next attempt with grown
+          delay rather than guessing. If the issue is now in a terminal
+          state, release the claim and have the issue's workspace removed. If
+          the issue is missing or no longer a dispatch candidate, release the
+          claim without removing the workspace.
+      - actor: responsibility.scheduling
+        action: >
+          If the issue is still a candidate, admit it only within global,
+          per-state, and worker-host capacity, honoring the preserved host
+          affinity; when capacity is unavailable, defer with a grown delay
+          instead of overcommitting.
+      - actor: responsibility.workspace-management
+        action: >
+          Remove the issue's recorded workspace when the terminal-state path
+          was taken.
+      - actor: concept.issue
+        action: >
+          Re-enter execution via Dispatch Issue when admitted, at the
+          preserved attempt number.
+    postconditions:
+      - The issue is running again, released, or re-scheduled; a due retry never leaves the issue in an undefined limbo.
+    invariants:
+      - invariant.tracker-authority
+      - invariant.backoff-bounded
+      - invariant.concurrency-limits
+    failures:
+      - failure.tracker-unavailable
+      - failure.capacity-exhausted-on-retry
+      - failure.workspace-cleanup-failed
+    requirements:
+      - level: must
+        statement: Base the retry decision on a tracker read performed at retry time, never on the snapshot that scheduled the retry.
+      - level: must
+        statement: Remove the issue's workspace when the tracker shows the issue terminal at retry time.
+      - level: must_not
+        statement: Act on a retry schedule that has been superseded by a newer one for the same issue.
+
+  - id: interaction.reconcile-active-runs
+    name: Reconcile Active Runs
+    purpose: >
+      Align every live run with tracker truth and with observed liveness,
+      stop runs the tracker has withdrawn, refresh snapshots for runs still
+      valid, and restart or block runs that have gone silent.
+    participants:
+      - responsibility.reconciliation
+      - responsibility.run-supervision
+      - concept.tracker
+      - concept.agent-run
+      - concept.issue
+      - concept.workspace
+    owner: responsibility.reconciliation
+    trigger: A scheduling pass begins and at least one run is live.
+    sequence:
+      - actor: responsibility.run-supervision
+        action: >
+          Examine each run's last observed activity; when a stall threshold
+          is configured and a non-blocked run has been silent longer than the
+          threshold, stop it and either block it (if its activity marks it
+          input-required) or schedule a failure retry continuing its attempt
+          history.
+      - actor: concept.tracker
+        action: Answer a read of all remaining running issues by identity.
+      - actor: responsibility.reconciliation
+        action: >
+          If that read failed, keep all runs unchanged. Otherwise, for each
+          reported issue, stop the run and remove the workspace when the
+          state is terminal; stop the run and keep the workspace when the
+          issue is unroutable or has left the active states; refresh the
+          run's stored snapshot when the issue is still active.
+      - actor: responsibility.reconciliation
+        action: >
+          Stop the run and keep the workspace for every running issue the
+          successful read did not report at all.
+      - actor: concept.agent-run
+        action: >
+          When stopped by reconciliation, terminate promptly and release the
+          issue's claim entirely (no retry is scheduled for
+          tracker-withdrawn runs).
+      - actor: concept.issue
+        action: >
+          Carry the refreshed snapshot for still-active runs, so per-state
+          capacity accounting and later decisions use current workflow
+          states.
+    postconditions:
+      - No run remains live for an issue the tracker reported terminal, non-active, unroutable, or absent.
+      - Stall handling never touched runs already awaiting operator input as blocked.
+    invariants:
+      - invariant.tracker-authority
+      - invariant.blocked-not-retried
+    failures:
+      - failure.tracker-unavailable
+      - failure.run-stalled
+      - failure.input-required
+    requirements:
+      - level: must
+        statement: Distinguish a failed tracker read (keep everything) from a successful read that omits an issue (stop that issue's run).
+      - level: must
+        statement: Remove the workspace only on the terminal-state path, not when stopping for non-active, unroutable, or missing issues.
+      - level: must_not
+        statement: Automatically restart a stalled run whose observed activity marks it as requiring operator input.
+
+  - id: interaction.reconcile-blocked-issues
+    name: Reconcile Blocked Issues
+    purpose: >
+      Re-check every blocked issue against the tracker and release the block
+      exactly when a human-visible change has occurred, keeping operator
+      escalations alive until then.
+    participants:
+      - responsibility.reconciliation
+      - concept.tracker
+      - concept.blocked-issue
+      - concept.issue
+      - concept.workspace
+    owner: responsibility.reconciliation
+    trigger: A scheduling pass begins and at least one issue is blocked.
+    sequence:
+      - actor: concept.tracker
+        action: Answer a read of all blocked issues by identity.
+      - actor: responsibility.reconciliation
+        action: >
+          If the read failed, keep every block unchanged. Otherwise, release
+          the block and claim when the issue is terminal (also removing its
+          workspace), unroutable, outside the active states, or absent from
+          the successful read; refresh the block's stored snapshot when the
+          issue is still active.
+      - actor: concept.blocked-issue
+        action: >
+          Persist with refreshed context while the issue stays active, so
+          operators keep seeing an accurate escalation.
+      - actor: concept.issue
+        action: >
+          Become eligible for future scheduling passes again once its claim
+          is released.
+    postconditions:
+      - Every remaining block corresponds to an issue the tracker still reports as active and routed here.
+      - No block was released merely because time passed or the tracker was unreachable.
+    invariants:
+      - invariant.tracker-authority
+      - invariant.blocked-not-retried
+    failures:
+      - failure.tracker-unavailable
+    requirements:
+      - level: must
+        statement: Release a block only on tracker-observed change, terminal, non-active, unroutable, or absent under a successful read.
+      - level: must
+        statement: Remove the blocked issue's workspace only on the terminal-state release path.
+
+  - id: interaction.provision-workspace
+    name: Provision Workspace
+    purpose: >
+      Produce the issue's isolated workspace on a given placement, creating
+      it if absent, reusing it if present, validating containment, and
+      running the operator's post-creation hook exactly when a fresh
+      directory was created.
+    participants:
+      - responsibility.workspace-management
+      - concept.issue
+      - concept.workspace
+      - concept.worker-host
+    owner: responsibility.workspace-management
+    trigger: A dispatch needs the issue's workspace.
+    sequence:
+      - actor: responsibility.workspace-management
+        action: >
+          Derive the workspace identity deterministically from the issue's
+          human-readable identifier, sanitizing unsafe characters and, when
+          sanitization changes the identifier, appending a collision-safe
+          discriminator derived from the original identifier.
+      - actor: responsibility.workspace-management
+        action: >
+          Resolve the workspace path under the configured root for the
+          placement and validate it, rejecting paths equal to the root,
+          outside the root, escaping the root via symlinks, or (for remote
+          placements) unrepresentable as a safe path.
+      - actor: concept.workspace
+        action: >
+          Be reused as-is when it already exists as a directory; otherwise be
+          freshly created (replacing any non-directory obstruction at the
+          path).
+      - actor: concept.worker-host
+        action: >
+          Perform the existence check and creation on its own filesystem when
+          the placement is remote, reporting unambiguously whether a fresh
+          directory was created.
+      - actor: responsibility.workspace-management
+        action: >
+          Run the operator's after-create hook inside the workspace only when
+          a fresh directory was created, under the configured hook timeout;
+          on hook failure or timeout, remove the freshly created directory
+          and fail the provisioning.
+    postconditions:
+      - On success, the workspace exists, satisfies containment, and is either the prior contents (reuse) or fully initialized (fresh creation with a successful hook).
+      - On failure, no half-initialized fresh workspace remains.
+    invariants:
+      - invariant.workspace-containment
+      - invariant.workspace-per-issue
+    failures:
+      - failure.workspace-provisioning-failed
+    requirements:
+      - level: must
+        statement: Run the after-create hook only for freshly created workspaces, never on reuse.
+      - level: must
+        statement: Fail provisioning (rather than proceed) when the after-create hook fails, and remove the fresh directory it ran in.
+      - level: must_not
+        statement: Create or operate on a workspace path that fails containment validation.
+
+  - id: interaction.startup-workspace-cleanup
+    name: Startup Workspace Cleanup
+    purpose: >
+      At orchestrator startup, remove leftover workspaces belonging to issues
+      the tracker already reports in terminal states, reclaiming space from
+      work finished in previous sessions.
+    participants:
+      - responsibility.workspace-management
+      - concept.tracker
+      - concept.issue
+      - concept.workspace
+      - concept.worker-host
+    owner: responsibility.workspace-management
+    trigger: The orchestrator starts, before its first scheduling pass.
+    sequence:
+      - actor: concept.tracker
+        action: Report the issues currently in the configured terminal workflow states.
+      - actor: responsibility.workspace-management
+        action: >
+          For each reported terminal issue, derive its workspace identity and
+          remove the workspace, running the operator's before-remove hook
+          first where the workspace exists, and tolerating hook failure.
+      - actor: concept.worker-host
+        action: >
+          Perform the removal on every configured remote host when remote
+          placements are configured, since the issue may have run on any of
+          them; otherwise remove locally.
+      - actor: concept.workspace
+        action: Cease to exist for terminal issues, subject to containment validation of every removed path.
+    postconditions:
+      - Workspaces of tracker-terminal issues no longer consume space on any configured placement, where removal succeeded.
+    invariants:
+      - invariant.workspace-containment
+    failures:
+      - failure.tracker-unavailable
+      - failure.workspace-cleanup-failed
+    requirements:
+      - level: must
+        statement: Skip the cleanup entirely (and proceed with startup) when the terminal-issue read fails; startup never depends on cleanup success.
+      - level: must_not
+        statement: Remove any path that fails containment validation, even during bulk cleanup.

@@ -1,0 +1,135 @@
+concepts:
+  - id: concept.issue
+    name: Issue
+    meaning: >
+      A unit of tracked work owned by the external issue tracker. From the
+      orchestrator's perspective an issue is a snapshot with a stable dispatch
+      identity, a human-readable identifier, a workflow state name, routing
+      attributes (dispatchability, labels, assignment), a priority, and a
+      creation time. The snapshot is always potentially stale; only the
+      tracker's current answer is authoritative.
+    properties:
+      - Has a stable dispatch identity within the configured tracker scope, distinct from its human-readable identifier.
+      - Its human-readable identifier is unique within the scope and is the basis for workspace identity.
+      - Carries a workflow state name; state names are compared case-insensitively after trimming surrounding whitespace.
+      - Is a dispatch candidate only when it is routable to this orchestrator (dispatchable and carrying all configured required labels), its state is in the configured active set, its state is not in the configured terminal set, and its identity, identifier, title, and state are all present and non-empty.
+
+  - id: concept.tracker
+    name: Tracker
+    meaning: >
+      The external issue-tracking system, accessed through a uniform read
+      boundary. It is the authority for issue existence, workflow state, and
+      routing. The orchestrator only reads from it; agent-side mutations stay
+      outside scheduling policy.
+    properties:
+      - Answers two read questions, fetch issues currently in a set of workflow states, and fetch issues by identity.
+      - May be temporarily unreachable; unreachability is a defined transient condition, not evidence about issue state.
+
+  - id: concept.agent-run
+    name: Agent Run
+    meaning: >
+      One supervised execution of an autonomous agent working a single issue.
+      The orchestrator tracks, per run, the issue snapshot it was started
+      from, its placement (worker host and workspace), its retry attempt
+      number, when it started, and the most recent activity observed from the
+      agent (event kind, message, timestamp).
+    properties:
+      - Belongs to exactly one issue; an issue has at most one live run at a time.
+      - Its recorded last-activity time is the timestamp of the most recent agent event, or the run start time if no event has arrived yet.
+      - Certain observed conditions mark the run as requiring operator input (an input-required or approval-required event, an input-required completion outcome, or an elicitation request); such a run is a blocking candidate, never a retry candidate.
+
+  - id: concept.retry-schedule
+    name: Retry Schedule
+    meaning: >
+      A pending decision to re-evaluate an issue for dispatch after a delay.
+      It records the attempt number, when it is due, the reason (error) that
+      caused it, and affinity hints (previous worker host and workspace path)
+      so a re-dispatch can resume where the prior run worked.
+    properties:
+      - At most one retry schedule exists per issue; scheduling a new one replaces and cancels the previous one.
+      - Its delay is derived from the attempt number and is bounded above by a configured maximum, except that the continuation check after a normal run completion uses a short fixed delay.
+      - Firing does not imply dispatch; the issue is re-validated against the tracker and against capacity first.
+
+  - id: concept.blocked-issue
+    name: Blocked Issue
+    meaning: >
+      A record that an issue's run reached a point requiring a human operator
+      (input, approval, or elicitation) and that automation for the issue is
+      suspended. The record preserves the diagnostic context (error
+      description, last agent activity, placement) so an operator can act.
+    properties:
+      - A blocked issue remains claimed, so it cannot be re-dispatched while blocked.
+      - Blocking is released only by tracker-observed change (the issue leaves the active states, becomes terminal, becomes unroutable, or disappears), never by a timer.
+
+  - id: concept.workspace
+    name: Workspace
+    meaning: >
+      An isolated per-issue working directory in which agent runs for that
+      issue execute, on the local machine or on a remote worker host. Its
+      identity is derived deterministically from the issue's human-readable
+      identifier, so any party knowing the identifier can locate the same
+      workspace.
+    properties:
+      - Identity derivation is collision-safe, two distinct identifiers never map to the same workspace directory name.
+      - Lives strictly below a configured workspace root; a workspace path equal to the root or escaping it (including via symlinks) is invalid.
+      - Is reused across successive runs of the same issue and removed when the issue reaches a terminal tracker state.
+
+  - id: concept.worker-host
+    name: Worker Host
+    meaning: >
+      An execution location for agent runs, either the local machine (when no
+      remote hosts are configured) or one of a configured set of remote
+      hosts. Each remote host has bounded run capacity.
+    properties:
+      - When remote hosts are configured, every run is placed on exactly one host with available capacity.
+      - Placement prefers the host a previous run of the same issue used, when that host has capacity; otherwise load is balanced toward less-loaded hosts.
+
+relationships:
+  - subject: concept.tracker
+    relation: is_authoritative_for
+    object: concept.issue
+    meaning: >
+      The tracker's current answer defines an issue's existence, workflow
+      state, and routing; every local record about the issue is a revocable
+      cache of that answer.
+
+  - subject: concept.agent-run
+    relation: works_on
+    object: concept.issue
+    meaning: >
+      An agent run exists only to advance one issue; the issue's tracker state
+      governs whether the run may continue to exist.
+
+  - subject: concept.agent-run
+    relation: executes_in
+    object: concept.workspace
+    meaning: >
+      Every run of an issue executes inside that issue's workspace, so
+      successive runs (retries, continuations) see prior work.
+
+  - subject: concept.agent-run
+    relation: is_placed_on
+    object: concept.worker-host
+    meaning: >
+      Each run occupies capacity on exactly one worker host for its duration.
+
+  - subject: concept.retry-schedule
+    relation: defers_re-evaluation_of
+    object: concept.issue
+    meaning: >
+      A retry schedule postpones the decision to run the issue again; it holds
+      the issue's claim in the meantime.
+
+  - subject: concept.blocked-issue
+    relation: suspends_automation_for
+    object: concept.issue
+    meaning: >
+      A blocked-issue record excludes the issue from dispatch and retry until
+      the tracker shows a relevant change.
+
+  - subject: concept.workspace
+    relation: isolates
+    object: concept.issue
+    meaning: >
+      The workspace confines all filesystem effects of working an issue to a
+      directory dedicated to that issue.

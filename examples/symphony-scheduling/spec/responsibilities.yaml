@@ -1,0 +1,70 @@
+responsibilities:
+  - id: responsibility.scheduling
+    name: Scheduling and Dispatch
+    purpose: >
+      Decide, on a recurring cadence, which eligible issues to start agent
+      runs for, in what order, and where — without exceeding any capacity
+      limit and without ever running the same issue twice concurrently.
+    owns:
+      - The polling cadence and the decision of when a scheduling pass happens.
+      - Candidate eligibility (routing, active/terminal state membership, claim status).
+      - Dispatch ordering (priority, then age, then a deterministic tiebreak).
+      - Admission control against the global limit, the per-issue-state limit, and per-worker-host limits.
+      - Pre-dispatch revalidation of the issue against the tracker and worker-host placement.
+    must_not_own:
+      - Issue workflow-state changes in the tracker (only humans or agent-side tools change tracker state).
+      - The agent's internal execution semantics.
+    normative:
+      - A conforming implementation MUST make the dispatch decision point unambiguous, exactly one authority admits runs against the capacity limits.
+
+  - id: responsibility.run-supervision
+    name: Run Supervision and Retry
+    purpose: >
+      Own the fate of every live agent run, observe its activity and its
+      exit, and translate each outcome into exactly one of continuation
+      check, retry with backoff, blocking for operator input, or release.
+    owns:
+      - Monitoring run liveness and recording last observed agent activity.
+      - Classifying run endings (normal completion, abnormal exit, stall, input-required).
+      - The retry policy, attempt counting, delay computation, bounded backoff, and preservation of retry context (error, host affinity, workspace).
+      - Creating and releasing blocked-issue records.
+    must_not_own:
+      - Deciding that an issue is finished; only tracker state can retire an issue.
+      - Capacity policy (it must consult Scheduling and Dispatch's admission rules when re-dispatching).
+    normative:
+      - Every run ending MUST resolve to exactly one supervised outcome; no run may simply vanish from orchestration state.
+
+  - id: responsibility.reconciliation
+    name: Tracker Reconciliation
+    purpose: >
+      Keep local orchestration state (running, retrying, blocked, claimed)
+      convergent with tracker truth by periodically re-reading tracked issues
+      and revoking local state the tracker no longer supports.
+    owns:
+      - Refreshing tracker snapshots for running and blocked issues.
+      - Stopping runs and releasing claims when issues become terminal, leave the active states, become unroutable, or disappear.
+      - Deciding which of those revocations also remove the issue's workspace.
+      - Tolerating transient tracker read failures without revoking anything.
+    must_not_own:
+      - Interpreting agent activity (that is run supervision).
+      - Tracker-side mutation of issues.
+    normative:
+      - Reconciliation MUST be fail-safe with respect to tracker outages, absence of an answer is never treated as absence of the issue when the read itself failed.
+
+  - id: responsibility.workspace-management
+    name: Workspace Management and Safety
+    purpose: >
+      Provide each issue with exactly one isolated, reusable workspace, run
+      operator hooks at defined lifecycle points, and guarantee that no
+      destructive operation ever escapes the configured workspace root.
+    owns:
+      - Deriving deterministic, collision-safe workspace identity from issue identifiers.
+      - Creating, reusing, validating, and removing workspaces locally and on remote worker hosts.
+      - Enforcing path containment (root membership, symlink-escape rejection) before destructive operations.
+      - Invoking operator hooks (after creation, before and after runs, before removal) and applying their failure semantics.
+      - Startup cleanup of workspaces belonging to terminal issues.
+    must_not_own:
+      - Scheduling decisions about when an issue runs.
+      - The content or version-control workflow inside a workspace.
+    normative:
+      - Workspace Management MUST be the only party that removes workspace directories; no other responsibility may perform filesystem deletion directly.

@@ -1,0 +1,102 @@
+chapters:
+  - id: chapter.orchestration-state-machine
+    name: Orchestration State Machine
+    overview: >
+      The heart of the subject is a small per-issue state machine layered on
+      top of the tracker's own workflow states. Each issue the orchestrator
+      touches moves through a claim lifecycle — eligible, running, awaiting
+      retry, blocked, released — in which exactly one form of local ownership
+      exists at a time. Three rules give the machine its character. First, a
+      claim is exclusive, an issue can never be worked twice concurrently.
+      Second, the tracker outranks every local belief, and local state is
+      revoked promptly (but only) when a successful tracker read withdraws
+      the issue. Third, a run that stops to ask a human for input leaves
+      automation entirely, it is held blocked, visible to operators, and no
+      timer will ever restart it. This chapter presents the lifecycle, those
+      three governing invariants, and the operator-input failure that
+      produces the blocked state.
+    contains:
+      - lifecycle
+      - invariant.single-run-per-issue
+      - invariant.tracker-authority
+      - invariant.blocked-not-retried
+      - failure.input-required
+
+  - id: chapter.polling-scheduling-dispatch
+    name: Polling, Scheduling, and Dispatch
+    overview: >
+      The orchestrator makes progress in recurring passes. Each pass first
+      reconciles what it already holds, then asks the tracker for issues in
+      the active workflow states, orders them by urgency and age, and admits
+      as many as capacity allows across three budgets — a global run limit, a
+      per-workflow-state limit, and per-worker-host capacity. Admission is
+      only a nomination, immediately before every run starts, the issue is
+      re-read from the tracker so no stale snapshot is ever dispatched, and a
+      placement is chosen that favors where the issue ran before. This
+      chapter covers the tick itself, the single-issue dispatch it delegates
+      to, the tracker read boundary and observability surface it exposes, the
+      capacity and freshness invariants, and how a pass degrades when the
+      tracker is unreachable or a run fails to start.
+    contains:
+      - interaction.poll-and-dispatch
+      - interaction.dispatch-issue
+      - interface.tracker-read
+      - interface.orchestrator-observability
+      - invariant.concurrency-limits
+      - invariant.dispatch-freshness
+      - failure.tracker-unavailable
+      - failure.spawn-failure
+
+  - id: chapter.retry-reconciliation
+    name: Retry and Reconciliation
+    overview: >
+      Agent runs are assumed to fail, stall, and lie by omission, so the
+      orchestrator supplies reliability from the outside. Every run ending is
+      classified into exactly one outcome, a normal exit earns a prompt
+      continuation check (completion of a run is not completion of the
+      issue), an abnormal exit earns a retry whose delay grows with a
+      preserved attempt history and is bounded above, and silence beyond the
+      stall threshold is treated as failure. When a retry comes due, nothing
+      is trusted, the issue is re-read from the tracker and re-admitted
+      against current capacity, or deferred again. In parallel, every pass
+      re-reads the issues behind live runs and blocks and revokes whatever
+      the tracker no longer supports — carefully distinguishing a failed read
+      (keep everything) from a successful read that omits an issue (stop that
+      run). This chapter collects the ending handler, the retry evaluation,
+      both reconciliation sweeps, the backoff invariant, and the crash,
+      stall, and contention failures.
+    contains:
+      - interaction.handle-run-completion
+      - interaction.retry-issue
+      - interaction.reconcile-active-runs
+      - interaction.reconcile-blocked-issues
+      - invariant.backoff-bounded
+      - failure.agent-run-crash
+      - failure.run-stalled
+      - failure.capacity-exhausted-on-retry
+
+  - id: chapter.workspace-management
+    name: Workspace Management and Safety
+    overview: >
+      Every issue works inside one deterministic, isolated directory derived
+      from its identifier — reused across retries and continuations so work
+      accumulates, and removed only when the tracker declares the issue
+      terminal. Because provisioning and cleanup run recursive filesystem
+      operations, locally and on remote hosts, safety is absolute rather
+      than best-effort, every path is validated to sit strictly inside the
+      configured root (never equal to it, never escaping it through
+      symlinks) before anything destructive happens, and identity derivation
+      is collision-free even for hostile identifiers. Operator hooks
+      customize the lifecycle at creation, around runs, and before removal,
+      with asymmetric failure semantics, setup hooks gate progress, teardown
+      hooks never block it. This chapter covers provisioning, startup
+      cleanup of terminal issues' leftovers, the hook interface, the two
+      safety invariants, and the provisioning and cleanup failures.
+    contains:
+      - interaction.provision-workspace
+      - interaction.startup-workspace-cleanup
+      - interface.workspace-hooks
+      - invariant.workspace-containment
+      - invariant.workspace-per-issue
+      - failure.workspace-provisioning-failed
+      - failure.workspace-cleanup-failed
