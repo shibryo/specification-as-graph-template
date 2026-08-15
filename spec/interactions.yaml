@@ -24,6 +24,10 @@ interactions:
       - invariant.outcome-is-unambiguous
     failures:
       - failure.processing-interrupted
+    # Any rendered list may name itself with `<field>_label`. Name what the list
+    # holds, not which slot of the record type it came from: a document whose
+    # labels are all type defaults has labels that carry no information.
+    requirements_label: Outcome requirements
     requirements:
       - level: must_not
         statement: Complete with an ambiguous externally observable outcome.

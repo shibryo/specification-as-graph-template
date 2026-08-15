@@ -4,7 +4,12 @@ chapters:
     overview: >
       How the board becomes running agents. This chapter defines what makes a Work
       Item a candidate, in what order candidates are taken, what stops a dispatch,
-      and the read boundary every one of those decisions goes through.
+      and the read boundary every one of those decisions goes through. Every rule
+      here is expressed over a normalized Work Item, because scheduling rules
+      written against one tracker's fields cannot be reused and every new provider
+      would otherwise reopen the scheduler. The board stays authoritative
+      throughout, at the price of reading the Work Source more often than a
+      cache-first design would.
     contains:
       - interaction.poll-and-dispatch
       - interface.work-source-adapter
@@ -50,7 +55,9 @@ chapters:
       What happens between runs. This chapter defines the states a Claim moves
       through, how the subject re-aligns with the board, how failure becomes another
       attempt, how a silent run is reclaimed, and how a run waiting on a human is
-      held rather than retried.
+      held rather than retried. Failure schedules another attempt rather than
+      stopping, because an orchestrator that stops on first failure needs an
+      operator to restart it.
     contains:
       - lifecycle
       - interaction.reconcile-claimed-items
