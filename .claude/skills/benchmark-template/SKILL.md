@@ -1,40 +1,42 @@
 ---
 name: benchmark-template
 description: >
-  Improve the specification-as-graph template by benchmarking it. Clean-room
-  recover a specification from an implementation, compare the rendered result
-  against that subject's authoritative hand-written specification, classify each
-  difference as a template defect or as example content, then fix the template.
-  Use when asked to improve or validate the template, to run a benchmark
-  recovery, or when a comparison against a hand-written specification has
-  surfaced gaps.
+  Improve this repository by benchmarking it. Clean-room recover a specification
+  from an implementation, compare the rendered SPEC.md against that subject's
+  authoritative hand-written specification, classify each difference by where it
+  has to be fixed, then fix it. Use when asked to improve or validate the
+  template, to run a benchmark recovery, or when a comparison against a
+  hand-written specification has surfaced gaps.
 ---
 
 # Benchmarking the template
 
-This repository's product is the template: `tools/spec.py`, `.spec/`, `AGENTS.md`,
-and the self-describing graph in `spec/`. Everything under `examples/` is a
-diagnostic instrument, not a deliverable.
+What this repository produces is a `SPEC.md`: a specification precise enough for
+an agent to implement from, that still explains the subject as a whole. Every
+other file exists to make that document good. `spec/` is the source of truth, the
+renderer is the projection, and `SPEC.md` is never edited by hand.
 
-The benchmark is a controlled experiment. Recover a specification from an
-implementation without looking at that subject's real specification, then read
-the real one and see what the template failed to make you produce. What survives
-that comparison is a template defect.
+The benchmark is a controlled experiment on that document. Recover a
+specification from an implementation without looking at that subject's real
+specification, render it, then read the real one and compare the two documents.
+Whatever the hand-written one does better is a defect in ours.
 
 ## Principles
 
-Hold these before anything else. The first one is the one that gets lost.
+Hold these before anything else. Each one has already been got wrong.
 
-- **The benchmark diagnoses; the template gets fixed.** A finding is not done
-  when the example looks better. It is done when the template would have
-  produced the better example on its own.
-- **Same gap for any subject means template. Only this subject means content.**
-  Ask: would a recovery of an unrelated subject hit this too?
-- **An existing knob is not a defect.** If `chapters.yaml`, `parameters.yaml`, or
-  an existing optional key could already express the difference, the finding is
-  about how the example was written. Leave the template alone and say so.
-- **Never fix the example to hide a template defect.** Editing the example first
-  destroys the evidence and the next benchmark rediscovers the same gap.
+- **Judge by the rendered document.** A change is good when `SPEC.md` reads
+  better, not when the graph looks tidier or the tooling gets cleverer. Read the
+  rendered output before and after.
+- **Never hand-edit `SPEC.md`.** If the document is wrong, the graph, the
+  renderer, or the guidance is wrong. Fix that and re-render.
+- **Fix the cause, not the symptom.** A finding fixed only in one example leaves
+  every future `SPEC.md` carrying it. Find the layer that would have prevented
+  it, fix there, then bring the example along.
+- **A knob nobody reaches for is a guidance defect.** If the graph could already
+  express the better shape but the recovery did not produce it, the renderer is
+  fine and `AGENTS.md` / `.spec/process.yaml` are not. That is still a repository
+  fix, not a shrug.
 - **A hand-written specification is not automatically right.** It can lag its own
   implementation. When it does, the recovery is correct and the disagreement is
   itself a finding worth recording.
@@ -43,15 +45,34 @@ Hold these before anything else. The first one is the one that gets lost.
 
 You need two things about one subject:
 
-1. an implementation you may read in full;
+1. an implementation you may read in full — the input;
 2. an authoritative implementation-facing specification of that same subject,
-   written by its owners.
+   written by its owners — the exemplar, and therefore the answer key.
 
-The second is the answer key. Before reading anything, **write down every path
-that counts as an answer key** and state it to the user. At minimum:
+### Default pair
+
+Unless the user names another subject, use:
+
+| Role | Source |
+|---|---|
+| Input | `openai/symphony`, the `elixir/` subtree |
+| Exemplar | `openai/symphony/SPEC.md` at the repository root |
+
+A local clone is usually at `~/ghq/github.com/openai/symphony`. Check `git log -1`
+and pin that revision in the recovery's `reference.yaml`; evidence citations are
+only as good as their anchor.
+
+Everything else in that repository is readable input, including `elixir/README.md`,
+`elixir/AGENTS.md`, `elixir/docs/`, `elixir/WORKFLOW.md`, the test suite, and the
+root `README.md`. Only the root `SPEC.md` is sealed.
+
+### Sealing
+
+Before reading anything, **write down every path that counts as an answer key**
+and state it to the user. At minimum:
 
 - the specification file in the implementation's own repository;
-- any prior recovery of the same subject in this repository's `examples/`;
+- any prior recovery of the same subject under `examples/`;
 - any rendered `SPEC.md` derived from either.
 
 If a prior recovery of this subject exists at the path you will write to, delete
@@ -75,35 +96,40 @@ Follow `.spec/process.yaml` and `AGENTS.md` for the recovery itself. Do not
 restate that process here — if it is wrong, fix those files, which is the whole
 point of this skill.
 
-Finish the phase properly: `validate` with **zero warnings**, then `render`. A
-recovery that still warns is not evidence about the template; it is evidence
-about the recoverer.
+Finish the phase properly: `validate` with **zero warnings**, then `render`, then
+**read the rendered document end to end**. A recovery you have not read is not
+evidence about anything.
 
 ## Phase 2 — Compare
 
-Now read the answer key. Build a difference ledger and keep it in the response;
-it is the artifact the rest of the work is driven from.
+Now read the answer key. Compare document against document, not graph against
+prose. Build a difference ledger and keep it in the response; the rest of the
+work is driven from it.
 
-| Difference | How the hand-written spec does it | Template today | Class | Goes to |
+| Difference | How the hand-written spec does it | Ours today | Class | Fix in |
 |---|---|---|---|---|
 
-Classify every row:
+Classify every row by **where the fix has to land**:
 
-| Class | Meaning | Goes to |
+| Class | Meaning | Fix in |
 |---|---|---|
-| `structure` | The hand-written spec organizes or renders something the template cannot express, or expresses differently | **Template** |
-| `content` | The recovery missed a fact its sources contained | Example — but check whether a missing `required_view` let it happen |
-| `deliberate` | The template's shape differs on purpose | Usually nothing. Ask whether a generated projection can serve both shapes |
-| `key-is-stale` | The hand-written spec contradicts its own implementation | Nothing. Record the finding |
+| `renderer` | The graph holds the facts but the document presents them worse, or cannot present them at all | `tools/spec.py`, `.spec/render.yaml` |
+| `schema` | The graph has nowhere to put something the document needs | record shape, validator, `.spec/schema/`, plus a demonstration in `spec/` |
+| `guidance` | The graph could have expressed it, but the process did not lead the author there | `AGENTS.md`, `.spec/process.yaml` — then re-cut the example |
+| `content` | The recovery missed a fact its sources contained | the example's graph — and ask what would have caught it |
+| `deliberate` | Ours differs on purpose and is defensible | nothing, but say why in the ledger |
+| `key-is-stale` | The hand-written spec contradicts its own implementation | nothing. Record the finding |
 
-Two rows deserve extra suspicion:
+Rows that get misclassified:
 
-- A `content` row that several unrelated recoveries would also miss is really a
-  `structure` row wearing a disguise. Promote it.
-- A `deliberate` row is the most common place to be lazy. State why the template's
-  shape is better, or reclassify it.
+- `content` that several unrelated recoveries would also miss is `guidance` in
+  disguise. Promote it.
+- "The knob already exists" is not a disposition. If the knob existed and the
+  document still came out worse, the row is `guidance`.
+- `deliberate` is where laziness hides. Justify it against the rendered document
+  or reclassify it.
 
-## Phase 3 — Change the template
+## Phase 3 — Fix
 
 One change ripples. Walk these layers in order every time, and say which ones the
 change does not touch rather than skipping them silently.
@@ -116,9 +142,11 @@ change does not touch rather than skipping them silently.
 | `.spec/process.yaml` | Required views, classification and normalization rules |
 | `AGENTS.md` | Rules an authoring agent must follow |
 | `spec/` | The template's self-description — a new key nobody demonstrates is invisible |
+| `examples/*/spec/` | The worked example is a published deliverable, not scratch |
 | `SPEC.md`, `examples/*/SPEC.md` | Any rendering change makes all of them stale |
+| `README.md` | It describes the worked example's shape; re-cutting chapters dates it |
 
-Invariants for template changes:
+Invariants for repository changes:
 
 - **New record keys are optional.** A graph without them must still validate and
   render, with the corresponding section simply absent.
@@ -147,6 +175,8 @@ forgetting an example.
 
 Then run the checks that `check` cannot do:
 
+- **Read the diff of the rendered documents.** This is the actual acceptance test.
+  Everything below is a guard against ways of fooling yourself about it.
 - **Negative checks.** When the change removes a phrase, `grep -c` it across every
   rendered file and confirm zero. Removals are the easiest thing to half-finish.
 - **Absent-key checks.** Confirm a graph that omits a new optional key still
@@ -161,7 +191,7 @@ Then run the checks that `check` cannot do:
 Report, in this order:
 
 1. the difference ledger with each row's disposition;
-2. what changed in the template, by layer;
+2. what changed, by layer;
 3. rows deliberately left open, as named candidates for the next run.
 
 Leaving rows open is normal. Leaving them unnamed is not.
