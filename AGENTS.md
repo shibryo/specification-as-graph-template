@@ -22,7 +22,7 @@ Do not document the implementation. Recover and specify the subject behind the i
 10. Attach normative statements to the model element they constrain.
 11. Do not create an unstructured requirements list as the primary specification model.
 12. Group behavior records into subject-domain chapters (`spec/chapters.yaml`) when the subject spans more than one domain.
-13. Recover the operator contract: every runtime-tunable setting that changes normative behavior becomes a parameter (`spec/parameters.yaml`) constraining the records it governs. The parameter's existence and semantics are normative; its name, format, and default stay implementation-defined unless the value itself is contractual. Give each parameter a `key` — a stable reference key used by the rendered document and cheat sheet.
+13. Recover the operator contract: every runtime-tunable setting that changes normative behavior becomes a parameter (`spec/parameters.yaml`) constraining the records it governs. The parameter's existence and semantics are normative; its name, format, and default stay implementation-defined unless the value itself is contractual. Give each parameter a `key` — a stable reference key used by the rendered document's configuration field list.
 14. Give concepts at data boundaries a typed field list (`attributes`: name, type, requiredness, meaning). Field lists exist to carry per-field facts that prose property lists lose — requiredness, ordering direction, comparison rules — not storage layout.
 15. Mark optional capability clusters as extensions (`conformance: extension` on chapters or records). Do not promote an extension to a core requirement, and do not drop it because it is optional.
 16. Attach falsifiable verification clauses to interactions and invariants; the renderer assembles them into the test and validation matrix.
@@ -46,11 +46,11 @@ Validation warns about overlong bullet items. Fix them by splitting, not by dele
 
 ## Redundancy rule
 
-Deliberate redundancy is a feature of good implementation-facing documents (cheat sheets, checklists, examples) and a maintenance hazard of hand-written ones. Here redundancy is generated: the config cheat sheet, the test and validation matrix, and the implementation checklist are projections of the same records as the body, so they cannot drift. Never hand-write a redundant summary into a record; add the projection to the renderer instead.
+Deliberate redundancy is a feature of good implementation-facing documents (cheat sheets, checklists, examples) and a maintenance hazard of hand-written ones. Here redundancy is generated: the configuration field list, the test and validation matrix, and the implementation checklist are projections of the same records as the body, so they cannot drift. Never hand-write a redundant summary into a record; add the projection to the renderer instead.
 
 ## Two implementers rule
 
-The rendered SPEC.md serves two implementation styles at once. An implementer who transcribes needs a scan path: the configuration specification and its cheat sheet, concept field lists, the test and validation matrix, the implementation checklist, and informative examples and algorithms. An implementer who reconstructs needs an understanding path: problem, design intent, system model, and the chapters in reading order.
+The rendered SPEC.md serves two implementation styles at once. An implementer who transcribes needs a scan path: the configuration field list, concept field lists, the test and validation matrix, the implementation checklist, and informative examples and algorithms. An implementer who reconstructs needs an understanding path: problem, design intent, system model, and the chapters in reading order.
 
 Every normative fact must be reachable through both paths. The renderer projects both from the same records, so they cannot disagree. When adding a record, ask which path each of its facts lands on; a fact reachable only through prose narrative fails the transcriber, and a fact reachable only through a table fails the reconstructor's understanding of why it holds.
 
@@ -94,7 +94,7 @@ The renderer MUST NOT degrade into concatenating records in storage order. It mu
 - implementation-defined freedom and documentation obligations;
 - reference implementation relationship;
 - test and validation matrix;
-- implementation checklist and config cheat sheet (generated redundancy);
+- implementation checklist and configuration field list (generated redundancy);
 - conformance expectations, including the omissible extension surface.
 
 Chapter structure is part of narrative integrity. When the subject spans more than one domain, the graph MUST declare subject-domain chapters (`spec/chapters.yaml`) that group interactions, interfaces, invariants, and failures — and, where it belongs to one domain, the lifecycle — by theme, in reading order. The renderer projects chapters in declared order; records assigned to no chapter fall to an appendix and are reported by validation. Type-ordered projection is acceptable only for single-topic subjects.

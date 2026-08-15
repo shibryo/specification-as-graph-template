@@ -25,7 +25,7 @@ This specification serves two implementation styles.
 
 To implement by transcription, use the scan path:
 
-- The Configuration Specification and its cheat sheet name every required field.
+- The Configuration Specification lists every operator-settable field.
 - Concept field lists give the data contract.
 - The Test and Validation Matrix lists the checks an implementation must pass.
 - The Implementation Checklist is the definition of done.
@@ -33,72 +33,42 @@ To implement by transcription, use the scan path:
 To implement by reconstruction, read in order:
 
 - The Problem Statement and Design Intent say why the subject exists.
-- The System Model defines the concepts and who owns each decision.
+- The System Overview and Core Domain Model define the participants and who owns each decision.
 - The chapters walk through behavior end to end.
 - Invariants and failures state what must survive your design choices.
 
 Both paths are projections of the same records. They cannot disagree.
 
-## Problem Statement
+## 1. Problem Statement
 
 Describe the environment, assumptions, and forces needed to understand the subject.
 
 Describe the problem independently of the current implementation.
 
-### Why This Specification Exists
+### 1.1 Why This Specification Exists
 
 Explain which design knowledge, guarantees, or boundaries would otherwise be lost, misunderstood, or coupled to a particular implementation.
 
-## Goals and Non-Goals
+## 2. Goals and Non-Goals
 
-### Goals
+### 2.1 Goals
 
 - Preserve the subject's intended semantics independently of implementation mechanism.
 - Make enough of the whole system explicit that another implementation can be built.
 
-### Non-Goals
+### 2.2 Non-Goals
 
 - Prescribe internal structure unless that structure is itself part of the contract.
 
-## Design Intent
+## 3. System Overview
 
-### Preserve semantic behavior
+Replace with one short paragraph telling the whole story: how a Request moves through the subject's responsibilities and becomes a Result.
 
-Conforming implementations should be free to vary internally while preserving externally meaningful behavior and the relationships between core concepts.
+### 3.1 Main Components
 
-Reproducing implementation details is not the same as preserving the system.
+One line per component, then its ownership. Generated from the same records as the rest of this document.
 
-Implications:
-
-- Normative statements should describe semantics before mechanisms.
-
-Notes:
-
-- Some implementation freedom is intentionally left unresolved by the specification.
-
-## System Model
-
-### Core Concepts
-
-#### Request
-
-A unit of intent submitted to the subject for processing.
-
-Fields:
-
-- `id` (string) — REQUIRED. Stable identity for the duration required by the specification.
-
-
-#### Result
-
-The externally meaningful outcome of processing a Request.
-
-
-### Concept Relationships
-
-**Request** produces **Result**. Processing a Request may produce one Result according to the required behavior.
-
-### Responsibilities and Ownership
+- **Request Processing** — Own the semantic transition from an accepted Request to an externally meaningful Result.
 
 #### Request Processing
 
@@ -117,27 +87,68 @@ Requirements:
 
 - A conforming implementation MUST make processing ownership unambiguous.
 
-## Configuration Specification
+### 3.2 External Dependencies
 
-Each field below must exist and be operator-settable. Keys are reference names used by this document, not required spellings. Concrete names, formats, and defaults are implementation-defined unless fixed elsewhere. The stated semantics are normative.
+A conforming deployment requires this environment.
 
-### `processing.capacity` — Processing capacity
+- Replace with an external system, credential, or runtime a deployment must supply.
 
-How many Requests may be processed concurrently.
+## 4. Core Domain Model
 
-- Admission of new Requests never exceeds the configured capacity.
-- Requests deferred by capacity are not lost; they remain eligible for later processing.
-- Operator changes take effect for subsequent admission decisions without restarting the subject.
+### 4.1 Entities
 
-Used by **Process Request**.
+One line per entity, then its full definition. Generated from the same records as the rest of this document.
 
-### Config Fields Summary (Cheat Sheet)
+- **Request** — A unit of intent submitted to the subject for processing.
+- **Result** — The externally meaningful outcome of processing a Request.
 
-One line per field. Generated from the same records as the full entries above.
+#### Request
+
+A unit of intent submitted to the subject for processing.
+
+Fields:
+
+- `id` (string) — REQUIRED. Stable identity for the duration required by the specification.
+
+
+#### Result
+
+The externally meaningful outcome of processing a Request.
+
+
+### 4.2 Relationships
+
+**Request** produces **Result**. Processing a Request may produce one Result according to the required behavior.
+
+## 5. Design Intent
+
+### Preserve semantic behavior
+
+Conforming implementations should be free to vary internally while preserving externally meaningful behavior and the relationships between core concepts.
+
+Reproducing implementation details is not the same as preserving the system.
+
+Implications:
+
+- Normative statements should describe semantics before mechanisms.
+
+Notes:
+
+- Some implementation freedom is intentionally left unresolved by the specification.
+
+## 6. Configuration Specification
+
+Each field below must exist and be operator-settable. Keys are reference names used by this document, not required spellings. Concrete names, formats, and defaults are implementation-defined unless fixed elsewhere. The stated semantics are normative. One entry per field; sub-bullets give its semantics, reload behavior, and the behaviors it governs.
+
+### 6.1 Core Fields
 
 - `processing.capacity` — How many Requests may be processed concurrently.
+  - Admission of new Requests never exceeds the configured capacity.
+  - Requests deferred by capacity are not lost; they remain eligible for later processing.
+  - Reload: Operator changes take effect for subsequent admission decisions without restarting the subject.
+  - Used by **Process Request**.
 
-## 1. Request Processing
+## 7. Request Processing
 
 How a Request becomes a Result: the end-to-end flow, the interface it is submitted through, the guarantees the flow must uphold, its lifecycle, and how it behaves when processing is interrupted.
 
@@ -242,7 +253,7 @@ Requirements:
 
 Recovery: The implementation may retry, resume, compensate, or fail terminally, provided the resulting authoritative state satisfies all invariants.
 
-## Implementation-Defined Areas
+## 8. Implementation-Defined Areas
 
 ### Persistence mechanism
 
@@ -264,26 +275,26 @@ Fixed semantics:
 
 - Responsibility ownership remains semantically unambiguous.
 
-## Reference Implementation
+## 9. Reference Implementation
 
 Describe the current or example implementation here if one exists. It is one realization of the specification and does not silently add normative requirements.
 
 The reference implementation is **not normative**; it is one realization of this specification.
 
-## Test and Validation Matrix
+## 10. Test and Validation Matrix
 
 Checks assembled from the verification clauses of this specification. A conforming implementation should be able to demonstrate each of them. Checks under an optional extension apply only when that extension is implemented.
 
-### 1. Request Processing
+### 10.1 Request Processing
 
 - **Process Request** — Submit a valid Request and verify exactly one unambiguous outcome (a Result or a defined failure) becomes observable.
 - **Outcome Is Unambiguous** — Attempt conflicting terminal transitions and verify that only one becomes authoritative.
 
-## Implementation Checklist (Definition of Done)
+## 11. Implementation Checklist (Definition of Done)
 
 Generated from the specification graph. Intentionally redundant with the body.
 
-### Core
+### 11.1 Core
 
 - Interactions: **Process Request**.
 - Lifecycle: implement every state and transition of the lifecycle.
@@ -293,7 +304,7 @@ Generated from the specification graph. Intentionally redundant with the body.
 - Configuration fields: `processing.capacity`.
 - Documentation: record the selected behavior for every implementation-defined area.
 
-## Conformance
+## 12. Conformance
 
 Implement a conforming realization of this specification. Preserve normative semantics and design intent. Do not infer additional constraints from the reference implementation. Where behavior is implementation-defined, choose a reasonable mechanism that preserves all stated invariants.
 

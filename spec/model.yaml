@@ -1,3 +1,15 @@
+# Optional whole-system narrative rendered at the top of the System Model,
+# before the generated at-a-glance participant list. Say how the participants
+# play together; do not repeat their individual definitions.
+overview: >
+  Replace with one short paragraph telling the whole story: how a Request
+  moves through the subject's responsibilities and becomes a Result.
+
+# Optional list of what the environment must supply for a conforming
+# deployment (external systems, credentials, runtimes). Delete if none.
+external_dependencies:
+  - Replace with an external system, credential, or runtime a deployment must supply.
+
 concepts:
   - id: concept.request
     name: Request
