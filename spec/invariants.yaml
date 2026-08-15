@@ -1,6 +1,7 @@
 invariants:
   - id: invariant.outcome-is-unambiguous
     name: Outcome Is Unambiguous
+    basis: derived
     statement: >
       For a given logical Request, the authoritative externally observable outcome
       does not simultaneously represent mutually exclusive terminal states.

@@ -1,0 +1,105 @@
+context: >
+  Teams track software work in an issue tracker (Linear, GitHub, GitLab, Jira,
+  Asana, or similar). Autonomous coding agents can execute much of that work,
+  but an agent session is a fragile, finite process: it can crash, stall, run
+  out of turns, or hit a question only a human can answer. Someone has to
+  watch the tracker, hand each eligible item to an agent in a safe workspace,
+  keep the agent honest about the item's current tracker state, and clean up
+  when the item is finished. Doing this by hand does not scale past a handful
+  of items, and doing it naively risks duplicate agents on one item, agents
+  working on closed items, or agents escaping their workspace.
+
+problem: >
+  Continuously convert active tracker work items into supervised coding-agent
+  runs, in parallel and unattended, while the tracker remains the single
+  source of truth for what is in scope, without ever running two agents on
+  the same item, without letting an agent touch anything outside its assigned
+  workspace, and while surfacing progress and blockage to a human operator.
+
+why_specification_exists: >
+  The subject's essential guarantees - single ownership of an item, tracker
+  supremacy over local state, revalidation before every dispatch, workspace
+  containment, blocked-versus-retry classification, and last-known-good
+  configuration - are scattered across one implementation's process tree.
+  Without a specification, a reimplementation would likely reproduce the easy
+  parts (poll, spawn) and silently lose the safety and reconciliation
+  semantics that make unattended operation acceptable.
+
+goals:
+  - Keep the issue tracker authoritative; local scheduling state always yields to fresh tracker state.
+  - Run at most one agent per work item at any time, across restarts and retries.
+  - Confine every agent run to an isolated, deterministic per-issue workspace.
+  - Recover from agent failure by bounded, backed-off retry rather than by dropping the item.
+  - Distinguish items that need operator input from items that merely failed, and hold rather than retry them.
+  - Let operators tune scheduling, safety, and agent behavior at runtime through one configuration artifact.
+  - Make orchestrator and agent activity observable to a human operator.
+
+non_goals:
+  - Specifying the coding agent itself or the quality of its work.
+  - Prescribing tracker-side workflow policy; that lives in the operator's prompt and tracker configuration.
+  - Coordinating multiple orchestrator instances beyond per-item routing hints (assignee and labels).
+  - Guaranteeing exactly-once effects inside the tracker or the repository; the agent owns its own idempotence.
+
+design_intents:
+  - name: Tracker supremacy
+    intent: >
+      The tracker is the only durable authority on an item's state. The
+      orchestrator holds claims, retry timers, and blocked entries as caches
+      of intent, and every consequential decision re-reads the tracker first.
+    why_it_matters: >
+      Humans and other tools move items concurrently. An orchestrator that
+      trusts its own memory will work on closed items or fight reassignment.
+    implications:
+      - Running and blocked items are re-checked against the tracker every poll cycle.
+      - An item is re-fetched and re-validated immediately before every agent spawn.
+      - Tracker unavailability yields inaction, never guesses.
+
+  - name: Fail toward retry, never toward duplication
+    intent: >
+      When an agent run ends for any reason other than operator input, the
+      item stays claimed and re-enters through a backed-off retry that
+      re-checks eligibility. The claim is the duplication guard.
+    why_it_matters: >
+      Unattended operation makes duplicate agents the most expensive failure:
+      two agents on one item corrupt each other's workspace and tracker notes.
+    implications:
+      - A claim persists across agent crashes, stalls, and capacity waits.
+      - Retry delays grow and are capped by an operator parameter.
+      - Only observed tracker-state change releases a claim.
+
+  - name: Bounded blast radius for unattended agents
+    intent: >
+      Every mechanism that lets the agent act - workspace, sandbox policy,
+      shell hooks, provider tools - is scoped to the single item being worked
+      and denied ambient credentials.
+    why_it_matters: >
+      The service runs without a human in the loop; the only acceptable
+      failure mode of a misbehaving agent is damage inside one workspace.
+    implications:
+      - Workspace paths are canonicalized and must resolve inside the configured root.
+      - Tracker credentials are withheld from the agent process environment.
+      - Starting the service requires an explicit operator acknowledgement of unattended execution.
+
+  - name: Last-known-good configuration
+    intent: >
+      Configuration is validated strictly at startup, then hot-reloaded; a
+      reload that fails validation never replaces the running configuration.
+    why_it_matters: >
+      An operator edit must not be able to take down agents that are mid-run.
+    implications:
+      - The service refuses to start on an invalid configuration.
+      - A failed reload logs the error and keeps serving the previous settings.
+    tradeoffs:
+      - A broken edit can go unnoticed while the stale configuration keeps working.
+
+  - name: Provider capabilities stay behind the adapter
+    intent: >
+      The scheduler depends only on normalized read operations. Everything
+      provider-specific - authentication, write operations, native agent
+      tools - stays behind the tracker adapter boundary.
+    why_it_matters: >
+      Scheduling policy must not accrete per-provider special cases, and new
+      trackers must be addable without touching the scheduler.
+    implications:
+      - Adapters normalize items into one issue shape before the scheduler sees them.
+      - Agent-side tracker mutations are optional provider-native tools, not scheduler features.

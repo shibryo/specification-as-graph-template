@@ -1,0 +1,700 @@
+interactions:
+  - id: interaction.load-config
+    name: Load Configuration at Startup
+    purpose: >
+      Turn the operator's workflow document into a validated running
+      configuration, or refuse to run.
+    participants:
+      - responsibility.config
+      - concept.workflow-document
+    owner: responsibility.config
+    trigger: The service starts with a workflow document path (explicit or defaulted).
+    preconditions:
+      - The operator has acknowledged unattended execution at invocation.
+    sequence:
+      - actor: responsibility.config
+        action: Read the workflow document and split it into structured settings and the prompt template.
+      - actor: responsibility.config
+        action: Parse the settings, apply defaults, and resolve environment references for secrets and paths.
+      - actor: responsibility.config
+        action: Validate structure, then run the selected tracker adapter's semantic validation.
+      - actor: responsibility.config
+        action: On success, publish the settings; on any failure, stop startup with the reason.
+    postconditions:
+      - Either the service runs with fully validated settings, or it did not start.
+    requirements:
+      - level: must
+        statement: Refuse startup when the document is missing, unparsable, or invalid.
+      - level: must
+        statement: Refuse startup when no supported tracker kind is configured.
+    invariants:
+      - invariant.valid-config-to-run
+    failures:
+      - failure.config-invalid-at-startup
+    evidence:
+      - evidence.workflow-store
+      - evidence.workflow-parse
+      - evidence.config-schema
+      - evidence.test-startup-preflight
+      - evidence.cli-guardrails
+    verification:
+      - Start with a missing document and verify the service exits with a missing-file error.
+      - Start with structurally invalid settings and verify startup is refused with the validation message.
+      - Start without a tracker kind and verify startup is refused.
+      - Start without the unattended-execution acknowledgement and verify the service prints the warning and exits nonzero.
+
+  - id: interaction.reload-config
+    name: Hot-Reload Configuration
+    purpose: >
+      Apply operator edits to the workflow document while the service runs,
+      without ever serving a partially valid configuration.
+    participants:
+      - responsibility.config
+      - concept.workflow-document
+    owner: responsibility.config
+    trigger: The workflow document's content changes while the service is running.
+    sequence:
+      - actor: responsibility.config
+        action: Detect that the document changed since the last successful load.
+      - actor: responsibility.config
+        action: Re-run the full load and validation pipeline on the new content.
+      - actor: responsibility.config
+        action: On success, atomically replace the served settings and prompt template.
+      - actor: responsibility.config
+        action: On failure, log the reason and continue serving the last known good configuration.
+    postconditions:
+      - Subsequent scheduling, agent, and observability decisions read the newest valid settings.
+    requirements:
+      - level: must
+        statement: Apply valid edits without a service restart.
+      - level: must_not
+        statement: Replace running settings with any configuration that failed validation.
+    invariants:
+      - invariant.valid-config-to-run
+    failures:
+      - failure.config-reload-invalid
+    evidence:
+      - evidence.workflow-store
+      - evidence.test-last-good
+    verification:
+      - Change the poll interval in the document and verify the next cycles use the new interval without restart.
+      - Write an invalid document and verify the previous settings keep being served and the error is logged.
+      - Restore a valid document and verify it takes effect on the next read.
+
+  - id: interaction.poll-cycle
+    name: Poll Cycle
+    purpose: >
+      Periodically synchronize the claim ledger with the tracker and fill
+      free capacity with the most deserving active issues.
+    participants:
+      - responsibility.scheduler
+      - responsibility.tracker
+      - concept.issue
+      - concept.claim
+    owner: responsibility.scheduler
+    trigger: The poll interval elapses, or an operator requests an immediate refresh.
+    sequence:
+      - actor: responsibility.scheduler
+        action: Refresh runtime-tunable settings (poll interval, concurrency caps).
+      - actor: responsibility.scheduler
+        action: Reconcile running and blocked claims against fresh tracker state.
+      - actor: responsibility.tracker
+        action: Fetch all issues currently in the configured active states.
+      - actor: responsibility.scheduler
+        action: Order candidates by priority, then age, then identifier.
+      - actor: responsibility.scheduler
+        action: Dispatch eligible candidates while capacity remains.
+      - actor: responsibility.scheduler
+        action: Schedule the next cycle after the configured interval.
+    postconditions:
+      - Every claim reflects tracker state as of this cycle, and free capacity was offered to eligible issues.
+    requirements:
+      - level: must
+        statement: Coalesce refresh requests when a cycle is already due or in progress.
+      - level: should
+        statement: Run the first cycle promptly after startup rather than waiting a full interval.
+    invariants:
+      - invariant.priority-order
+    failures:
+      - failure.tracker-unreachable
+    evidence:
+      - evidence.orchestrator-poll
+      - evidence.orchestrator-sort
+      - evidence.test-retry-backoff
+    verification:
+      - Observe that a cycle runs shortly after startup and then at the configured interval.
+      - Issue several refresh requests during one cycle and verify only one additional cycle results.
+      - Present candidates with mixed priorities and ages and verify dispatch order is priority, then oldest creation time, then identifier.
+
+  - id: interaction.dispatch-issue
+    name: Dispatch Issue
+    purpose: >
+      Admit one eligible issue into execution: verify eligibility against the
+      freshest possible state, take the claim, and start a supervised agent
+      run.
+    participants:
+      - responsibility.scheduler
+      - responsibility.tracker
+      - responsibility.agent-runner
+      - concept.issue
+      - concept.claim
+    owner: responsibility.scheduler
+    trigger: A poll cycle or a due retry selects a candidate issue while capacity is free.
+    preconditions:
+      - The issue has non-empty id, identifier, title, and state.
+      - The issue is in an active state, not a terminal state, and routed to this orchestrator.
+      - No claim (running, retrying-consumed, or blocked) exists for the issue id.
+      - Global, per-state, and per-host concurrency limits all have a free slot.
+    sequence:
+      - actor: responsibility.tracker
+        action: Re-fetch the issue by id immediately before spawning.
+      - actor: responsibility.scheduler
+        action: Skip the dispatch when the refreshed issue is missing, terminal, unrouted, or otherwise ineligible.
+      - actor: responsibility.scheduler
+        action: Select the execution target for the run.
+      - actor: responsibility.scheduler
+        action: Record the claim with attempt metadata, then start and monitor the agent run.
+      - actor: responsibility.agent-runner
+        action: Begin the run for the refreshed issue on the selected target.
+    postconditions:
+      - Exactly one running claim exists for the issue, or the issue was skipped with its claim state unchanged.
+    requirements:
+      - level: must
+        statement: Skip dispatch silently when refresh shows the issue no longer eligible.
+      - level: must
+        statement: Schedule a retry when spawning the run fails.
+    invariants:
+      - invariant.single-claim
+      - invariant.concurrency-caps
+      - invariant.dispatch-revalidation
+    failures:
+      - failure.spawn-failure
+    evidence:
+      - evidence.orchestrator-dispatch-guards
+      - evidence.orchestrator-revalidate
+      - evidence.orchestrator-slots
+      - evidence.test-dispatch-eligibility
+      - evidence.test-no-overlap
+    verification:
+      - Verify a claimed, running, or blocked issue is never dispatched again while the claim holds.
+      - Move an issue to a terminal state between listing and dispatch and verify the dispatch is skipped.
+      - Fill the global cap and verify further candidates wait; repeat for a per-state cap.
+      - Kill the run spawn and verify a retry is scheduled instead of losing the issue.
+
+  - id: interaction.reconcile-claims
+    name: Reconcile Claims Against Tracker
+    purpose: >
+      Make fresh tracker state override every locally held claim, stopping
+      agents and releasing claims the tracker no longer justifies.
+    participants:
+      - responsibility.scheduler
+      - responsibility.tracker
+      - responsibility.workspace-manager
+      - concept.issue
+      - concept.claim
+      - concept.workspace
+    owner: responsibility.scheduler
+    trigger: Each poll cycle begins, before any new dispatch.
+    sequence:
+      - actor: responsibility.tracker
+        action: Fetch fresh issues for every running and every blocked claim id.
+      - actor: responsibility.scheduler
+        action: For a now-terminal issue, stop its agent, request workspace removal, and release the claim.
+      - actor: responsibility.workspace-manager
+        action: Remove the workspace recorded for each terminal issue.
+      - actor: responsibility.scheduler
+        action: For an issue no longer routed here or no longer active, stop its agent and release the claim, keeping the workspace.
+      - actor: responsibility.scheduler
+        action: For an issue absent from the fetch result, stop its agent or release its block, keeping the workspace.
+      - actor: responsibility.scheduler
+        action: For a still-active issue, refresh the cached issue snapshot on the claim.
+    postconditions:
+      - No agent is running for an issue the tracker shows terminal, inactive, unrouted, or missing.
+    requirements:
+      - level: must_not
+        statement: Stop agents or release claims when the reconciliation fetch itself fails.
+      - level: must
+        statement: Remove the workspace only for issues observed in a terminal state.
+    invariants:
+      - invariant.tracker-authority
+    failures:
+      - failure.tracker-unreachable
+    evidence:
+      - evidence.orchestrator-reconcile
+      - evidence.test-reconcile
+    verification:
+      - Move a running issue to a terminal state and verify the agent stops and the workspace is removed.
+      - Remove a required label from a running issue and verify the agent stops and the workspace is kept.
+      - Make the tracker fetch fail during reconciliation and verify all agents keep running.
+      - Move a blocked issue to a terminal state and verify the block is released and the workspace removed.
+
+  - id: interaction.retry-issue
+    name: Retry a Claimed Issue
+    purpose: >
+      Re-admit a claimed issue after a failure, a stall, a capacity wait, or
+      a normal completion check, with backoff and full re-validation.
+    participants:
+      - responsibility.scheduler
+      - responsibility.tracker
+      - concept.issue
+      - concept.claim
+    owner: responsibility.scheduler
+    trigger: A retry timer fires for a claimed issue.
+    sequence:
+      - actor: responsibility.scheduler
+        action: Ignore the timer when it does not match the currently scheduled retry for that issue.
+      - actor: responsibility.tracker
+        action: Re-fetch the issue by id.
+      - actor: responsibility.scheduler
+        action: Release the claim (removing the workspace when terminal) if the issue is terminal, inactive, unrouted, or missing.
+      - actor: responsibility.scheduler
+        action: When still eligible and capacity is free, redispatch, preserving the attempt count and preferred execution target.
+      - actor: responsibility.scheduler
+        action: When capacity is exhausted or the refetch fails, reschedule with the next backoff step.
+    postconditions:
+      - The issue is running again, rescheduled with a larger delay, or fully released - never silently dropped.
+    requirements:
+      - level: must
+        statement: Preserve attempt count and prior execution target across rescheduled retries.
+      - level: must
+        statement: Increase the delay between consecutive failure retries up to the configured cap.
+    invariants:
+      - invariant.bounded-backoff
+    failures:
+      - failure.tracker-unreachable
+    evidence:
+      - evidence.orchestrator-retry
+      - evidence.test-retry-backoff
+      - evidence.test-reconcile
+    verification:
+      - Fail an agent repeatedly and verify each retry waits longer, up to the configured maximum.
+      - Fire a stale (superseded) retry timer and verify it consumes nothing.
+      - Fill capacity when a retry fires and verify the retry reschedules instead of dropping the claim.
+      - Move the issue out of active states before the retry fires and verify the claim is released.
+
+  - id: interaction.block-issue
+    name: Block an Issue on Operator Input
+    purpose: >
+      Convert an agent run that is waiting on a human decision into a held,
+      non-retrying blocked claim that a human can discover and resolve.
+    participants:
+      - responsibility.scheduler
+      - concept.claim
+      - concept.issue
+      - concept.agent-session
+    owner: responsibility.scheduler
+    trigger: >
+      An agent run exits, or stalls past the stall timeout, while its last
+      observed signal indicates required operator input or approval.
+    sequence:
+      - actor: responsibility.scheduler
+        action: Stop the agent session if it is still running.
+      - actor: responsibility.scheduler
+        action: Record a blocked entry carrying the reason, session id, workspace path, execution target, and last session signal.
+      - actor: responsibility.scheduler
+        action: Drop any pending retry state and keep the claim held.
+      - actor: responsibility.scheduler
+        action: Exclude the issue from dispatch and retry until reconciliation observes a tracker-state change.
+    postconditions:
+      - The issue is visible as blocked with its reason, and no agent or retry timer exists for it.
+    requirements:
+      - level: must_not
+        statement: Automatically restart or retry a blocked issue while its tracker state is unchanged.
+      - level: must
+        statement: Expose the blocking reason to the operator-facing status surface.
+    invariants:
+      - invariant.blocked-not-retried
+    failures:
+      - failure.input-required
+    evidence:
+      - evidence.orchestrator-block
+      - evidence.test-blocking
+    verification:
+      - End a run with an input-required signal and verify the issue becomes blocked, not retried.
+      - Verify a normal exit whose last signal was input-required also blocks.
+      - Verify blocked issues are skipped by dispatch until the tracker state changes.
+      - Change the blocked issue's tracker state and verify reconciliation releases the block.
+
+  - id: interaction.stall-detection
+    name: Detect and Recover Stalled Runs
+    purpose: >
+      Notice agent runs that have stopped making observable progress and
+      route them to retry or to blocked handling.
+    participants:
+      - responsibility.scheduler
+      - concept.claim
+      - concept.agent-session
+      - concept.session-event
+    owner: responsibility.scheduler
+    trigger: A poll cycle inspects running claims while a stall timeout is configured.
+    sequence:
+      - actor: responsibility.scheduler
+        action: Compute each run's idle time from its last session event, falling back to its start time.
+      - actor: responsibility.scheduler
+        action: Leave runs alone while idle time is within the stall timeout, or when the timeout is disabled.
+      - actor: responsibility.scheduler
+        action: For a stalled run whose last signal indicates operator input, stop the session and block the issue.
+      - actor: responsibility.scheduler
+        action: For any other stalled run, stop the session and schedule a backed-off retry.
+    postconditions:
+      - No run stays silently idle beyond the stall timeout.
+    requirements:
+      - level: must
+        statement: Treat a zero or negative stall timeout as disabling stall detection.
+      - level: must_not
+        statement: Remove the workspace when recovering a stalled run.
+    invariants:
+      - invariant.blocked-not-retried
+    failures:
+      - failure.agent-stalled
+    evidence:
+      - evidence.orchestrator-stall
+      - evidence.test-blocking
+    verification:
+      - Let a run go idle past the stall timeout and verify it is stopped and retried with backoff.
+      - Stall a run after an elicitation request and verify it is blocked instead of retried.
+      - Set the stall timeout to zero and verify idle runs are left alone.
+
+  - id: interaction.agent-run
+    name: Agent Run
+    purpose: >
+      Execute one supervised attempt at an issue: a prepared workspace, one
+      agent session, and a bounded loop of turns that continues only while
+      the tracker still wants the work done here.
+    participants:
+      - responsibility.agent-runner
+      - responsibility.workspace-manager
+      - responsibility.codex-client
+      - responsibility.tracker
+      - concept.issue
+      - concept.workspace
+      - concept.agent-session
+    owner: responsibility.agent-runner
+    trigger: Dispatch starts a run for a claimed issue.
+    sequence:
+      - actor: responsibility.workspace-manager
+        action: Provision the issue's workspace on the selected execution target.
+      - actor: responsibility.agent-runner
+        action: Report the resolved workspace path and execution target back to the scheduler.
+      - actor: responsibility.workspace-manager
+        action: Run the before_run hook; a failure aborts the run.
+      - actor: responsibility.codex-client
+        action: Start one agent session with the workspace as working directory and the configured policies.
+      - actor: responsibility.agent-runner
+        action: Render the first-turn prompt from the operator template with the issue fields and attempt number.
+      - actor: responsibility.codex-client
+        action: Run the turn, streaming session events to the scheduler.
+      - actor: responsibility.tracker
+        action: Re-fetch the issue after each completed turn.
+      - actor: responsibility.agent-runner
+        action: Start a continuation turn while the issue stays active and routed here and the turn budget remains.
+      - actor: responsibility.agent-runner
+        action: End the run when the issue is done, routing is lost, or the turn budget is exhausted.
+      - actor: responsibility.workspace-manager
+        action: Run the after_run hook on every exit path, ignoring its failures.
+      - actor: responsibility.codex-client
+        action: Tear down the session on every exit path.
+    postconditions:
+      - The session is closed, teardown hooks ran, and the scheduler observed the run's outcome.
+      - After a normal completion, the scheduler schedules a prompt continuation check for the issue.
+    requirements:
+      - level: must_not
+        statement: Start a continuation turn after the issue leaves active states or loses routing.
+      - level: must
+        statement: Return control to the scheduler when the turn budget is exhausted with the issue still active.
+      - level: must
+        statement: Keep the workspace intact after the run ends.
+    invariants:
+      - invariant.turn-bound
+      - invariant.secret-isolation
+    failures:
+      - failure.agent-abnormal-exit
+      - failure.turn-timeout
+      - failure.input-required
+    evidence:
+      - evidence.agent-runner
+      - evidence.test-turnloop
+      - evidence.workflow-example
+    verification:
+      - Keep an issue active and verify the run continues with follow-up turns until the turn budget.
+      - Verify a run at the turn budget returns to the scheduler and a later run resumes the same workspace.
+      - Remove a required label mid-run and verify no further continuation turn starts.
+      - Verify the after_run hook and session teardown execute on both success and failure paths.
+      - Verify a normal completion is followed by a scheduled continuation check for the issue.
+
+  - id: interaction.handle-approvals
+    name: Handle Mid-Turn Requests
+    purpose: >
+      Answer the agent runtime's mid-turn requests - approvals, tool calls,
+      and input requests - according to the operator's approval policy,
+      without ever leaving the turn waiting silently.
+    participants:
+      - responsibility.codex-client
+      - concept.agent-session
+      - concept.session-event
+    owner: responsibility.codex-client
+    trigger: The agent session emits a request during a running turn.
+    sequence:
+      - actor: responsibility.codex-client
+        action: Execute advertised dynamic tool calls and reply with a structured result, continuing the turn.
+      - actor: responsibility.codex-client
+        action: Answer unsupported tool calls with a structured failure naming the supported tools, continuing the turn.
+      - actor: responsibility.codex-client
+        action: Under an auto-approving policy, grant approval requests for the session and continue the turn.
+      - actor: responsibility.codex-client
+        action: Under any other policy, end the turn as an approval-required blocker.
+      - actor: responsibility.codex-client
+        action: End the turn as an input-required blocker for freeform input and elicitation requests that cannot be auto-answered.
+    postconditions:
+      - Every mid-turn request received a reply or ended the turn with a classified blocker.
+    requirements:
+      - level: must_not
+        statement: Leave a mid-turn request unanswered while the turn keeps waiting.
+      - level: must
+        statement: Distinguish approval-required and input-required outcomes from generic turn failure.
+    invariants:
+      - invariant.secret-isolation
+    failures:
+      - failure.input-required
+    evidence:
+      - evidence.app-server-approvals
+      - evidence.test-approvals
+    verification:
+      - Under the auto-approving policy, verify command and patch approval requests are granted for the session.
+      - Under a safer policy, verify an approval request ends the turn as approval-required.
+      - Send a freeform input request and verify the turn ends as input-required.
+      - Call an unsupported tool and verify a failure reply arrives and the turn does not stall.
+
+  - id: interaction.create-workspace
+    name: Provision Workspace
+    purpose: >
+      Give an agent run a deterministic, contained, bootstrapped directory
+      for its issue, reusing prior work when it exists.
+    participants:
+      - responsibility.workspace-manager
+      - concept.issue
+      - concept.workspace
+    owner: responsibility.workspace-manager
+    trigger: An agent run needs its issue's workspace.
+    sequence:
+      - actor: responsibility.workspace-manager
+        action: Derive the deterministic, collision-safe workspace key from the issue identifier.
+      - actor: responsibility.workspace-manager
+        action: Resolve the path under the configured root, canonicalize it, and verify containment.
+      - actor: responsibility.workspace-manager
+        action: Reuse an existing directory unchanged; replace a non-directory; create the directory when absent.
+      - actor: responsibility.workspace-manager
+        action: Run the after_create bootstrap hook only when the directory was newly created.
+      - actor: responsibility.workspace-manager
+        action: On bootstrap failure or timeout, remove the newly created directory and fail the provisioning.
+    postconditions:
+      - The workspace exists, is contained under the root, and is bootstrapped exactly once.
+    requirements:
+      - level: must
+        statement: Reuse an existing workspace without deleting its contents.
+      - level: must
+        statement: Guarantee a failed bootstrap leaves no half-initialized workspace behind.
+    invariants:
+      - invariant.workspace-containment
+      - invariant.workspace-determinism
+    failures:
+      - failure.workspace-bootstrap-failed
+      - failure.workspace-unsafe-path
+    evidence:
+      - evidence.workspace-create
+      - evidence.workspace-key
+      - evidence.workspace-validate
+      - evidence.test-workspace-safety
+      - evidence.test-hooks
+    verification:
+      - Provision the same issue twice and verify the same path with contents preserved.
+      - Provision two identifiers that sanitize identically and verify distinct paths.
+      - Point the workspace at a symlink escaping the root and verify provisioning is refused.
+      - Fail the bootstrap hook and verify the fresh directory is removed and the next attempt bootstraps again.
+
+  - id: interaction.cleanup-workspace
+    name: Remove Workspace for Finished Issue
+    purpose: >
+      Reclaim workspaces once the tracker shows their issues terminal,
+      giving the operator's teardown hook a chance to salvage state first.
+    participants:
+      - responsibility.scheduler
+      - responsibility.workspace-manager
+      - concept.issue
+      - concept.workspace
+    owner: responsibility.workspace-manager
+    trigger: >
+      Reconciliation or a retry check observes a terminal issue, or the
+      service starts and sweeps issues already terminal.
+    sequence:
+      - actor: responsibility.scheduler
+        action: Identify the workspace by its recorded path when known, otherwise derive it from the issue identifier per execution target.
+      - actor: responsibility.workspace-manager
+        action: Run the before_remove hook in the workspace; its failure or timeout never prevents removal.
+      - actor: responsibility.workspace-manager
+        action: Validate containment of the target path, then remove the directory.
+    postconditions:
+      - Workspaces for terminal issues no longer exist on any configured execution target.
+    requirements:
+      - level: must
+        statement: Sweep and remove workspaces of already-terminal issues at startup.
+      - level: must_not
+        statement: Remove the configured workspace root itself or any path outside it.
+    invariants:
+      - invariant.workspace-containment
+    failures:
+      - failure.hook-nonblocking
+      - failure.workspace-unsafe-path
+    evidence:
+      - evidence.orchestrator-startup-cleanup
+      - evidence.workspace-hooks
+      - evidence.test-hooks
+      - evidence.test-reconcile
+    verification:
+      - Move an issue to a terminal state and verify its workspace is removed after the before_remove hook runs.
+      - Make the before_remove hook fail and verify removal still completes.
+      - Record a workspace path that escapes containment and verify removal is refused.
+      - Restart the service with terminal issues present and verify their workspaces are swept.
+
+  - id: interaction.execute-agent-tool
+    name: Execute Provider-Native Agent Tool
+    purpose: >
+      Let the agent act on the tracker through tools the adapter advertises,
+      using a credential and settings snapshot fixed at session start.
+    conformance: extension
+    participants:
+      - responsibility.codex-client
+      - responsibility.tracker
+      - concept.agent-session
+      - concept.issue
+    owner: responsibility.tracker
+    trigger: The agent session calls a dynamic tool during a turn.
+    preconditions:
+      - The adapter advertised at least one tool at session start.
+    sequence:
+      - actor: responsibility.tracker
+        action: At session start, bind the adapter, tracker settings, tool specifications, and secret names into one snapshot.
+      - actor: responsibility.codex-client
+        action: Advertise the bound tool specifications to the session.
+      - actor: responsibility.tracker
+        action: On a call, validate the arguments against the tool's declared contract before contacting the provider.
+      - actor: responsibility.tracker
+        action: Execute the call with the bound settings and return a structured success or failure payload.
+      - actor: responsibility.codex-client
+        action: Reply the payload to the session so the turn continues.
+    postconditions:
+      - The tool result reached the session, and no live configuration read occurred during execution.
+    requirements:
+      - level: must
+        statement: Reject invalid tool arguments before any provider request.
+      - level: must
+        statement: Answer unknown tools with a failure payload naming supported tools.
+    invariants:
+      - invariant.tool-binding-stability
+    failures:
+      - failure.tool-call-failed
+    evidence:
+      - evidence.tracker-bind
+      - evidence.tracker-boundary
+      - evidence.test-tool-binding
+    verification:
+      - Reload the configuration mid-session and verify tool execution still uses the session-start snapshot.
+      - Call a tool with invalid arguments and verify a validation failure with no provider request.
+      - Verify provider error responses are returned as structured failures preserving the body.
+
+  - id: interaction.remote-agent-run
+    name: Run Agents on Remote Worker Hosts
+    purpose: >
+      Spread agent runs across configured remote worker hosts while keeping
+      each run pinned to one host and each host under its concurrency cap.
+    conformance: extension
+    participants:
+      - responsibility.scheduler
+      - responsibility.workspace-manager
+      - responsibility.codex-client
+      - concept.worker-host
+      - concept.workspace
+      - concept.agent-session
+    owner: responsibility.scheduler
+    trigger: Worker hosts are configured and an issue is dispatched or retried.
+    sequence:
+      - actor: responsibility.scheduler
+        action: Prefer the run's previously recorded host when it has capacity; otherwise pick the least-loaded host with capacity.
+      - actor: responsibility.scheduler
+        action: Defer the dispatch entirely when every host is at its per-host cap.
+      - actor: responsibility.workspace-manager
+        action: Provision the workspace on the chosen host with the same reuse, replace, and bootstrap semantics as locally.
+      - actor: responsibility.codex-client
+        action: Launch the agent session on the chosen host in the workspace, with tracker secrets withheld.
+      - actor: responsibility.workspace-manager
+        action: Run lifecycle hooks on the chosen host in the workspace.
+      - actor: responsibility.scheduler
+        action: Surface remote failures into the normal retry path, preserving the host preference.
+    postconditions:
+      - The whole run - workspace, hooks, session - executed on exactly one host.
+    requirements:
+      - level: must_not
+        statement: Move a run to a different host within one run lifetime.
+      - level: must
+        statement: Enforce the per-host concurrency cap during host selection.
+    invariants:
+      - invariant.host-affinity
+      - invariant.concurrency-caps
+    failures:
+      - failure.remote-command-failed
+    evidence:
+      - evidence.orchestrator-slots
+      - evidence.agent-runner-affinity
+      - evidence.ssh
+      - evidence.test-hostcaps
+      - evidence.test-remote
+    verification:
+      - Fill one host to its cap and verify new runs land on another host.
+      - Fill every host and verify dispatch defers with the claim intact.
+      - Fail the remote session launch and verify the failure surfaces to retry with the same preferred host.
+      - Verify remote workspaces are removed on the host when their issues become terminal.
+
+  - id: interaction.observe-status
+    name: Observe Orchestrator Status
+    purpose: >
+      Give a human operator a live, accurate view of what the orchestrator
+      is doing and a lever to make it look at the tracker right now.
+    conformance: extension
+    participants:
+      - responsibility.observability
+      - responsibility.scheduler
+      - concept.claim
+      - concept.session-event
+    owner: responsibility.observability
+    trigger: An operator views the dashboard or queries the status API, or scheduler state changes push an update.
+    sequence:
+      - actor: responsibility.scheduler
+        action: Fold incoming session events into per-claim telemetry (session id, last event, token usage, rate limits).
+      - actor: responsibility.scheduler
+        action: Serve snapshots exposing running, retrying, and blocked claims plus cumulative totals and the poll countdown.
+      - actor: responsibility.observability
+        action: Render the snapshot to the terminal dashboard and connected viewers, coalescing updates per render interval.
+      - actor: responsibility.observability
+        action: Serve the status API - full state, per-issue lookup, and refresh trigger.
+      - actor: responsibility.scheduler
+        action: On a refresh request, run an immediate poll cycle unless one is already due or in progress.
+    postconditions:
+      - The operator can see every claim's phase, error, and telemetry without affecting scheduling.
+    requirements:
+      - level: must
+        statement: Report scheduler unavailability or slowness explicitly instead of failing the viewer.
+      - level: must
+        statement: Expose blocked issues with their blocking reasons.
+    invariants:
+      - invariant.token-accounting
+    failures:
+      - failure.snapshot-unavailable
+    evidence:
+      - evidence.dashboard
+      - evidence.http-api
+      - evidence.test-observability
+    verification:
+      - Emit a session event and verify the snapshot reflects the session id and last event.
+      - Verify a snapshot lists retry entries with attempt and due time, and blocked entries with reasons.
+      - Query an unknown issue and verify a not-found response; use a wrong method and verify method-not-allowed.
+      - Make the scheduler unresponsive and verify the surface reports a timeout instead of crashing.

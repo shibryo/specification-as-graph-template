@@ -1,0 +1,112 @@
+areas:
+  - name: Configuration document syntax
+    freedom: >
+      Any concrete syntax may carry the workflow document, provided one
+      artifact combines structured settings and the prompt template.
+    fixed_semantics:
+      - Setting semantics follow the parameter keys of this specification.
+      - Environment references resolve at load time.
+    document:
+      - The concrete syntax and the mapping from parameter keys to setting names.
+      - The template language and its strictness behavior.
+
+  - name: Configuration change detection
+    freedom: >
+      Any mechanism may detect workflow document changes (polling a content
+      stamp, filesystem events, explicit signal).
+    fixed_semantics:
+      - Valid edits become effective without a restart.
+      - Detection latency is bounded and small relative to the poll interval.
+    document:
+      - The detection mechanism and its worst-case latency.
+
+  - name: Retry backoff curve
+    freedom: >
+      The delay progression between failure retries is free (the reference
+      doubles from a base of ten seconds).
+    fixed_semantics:
+      - Delays never decrease across consecutive failures of one issue.
+      - Delays never exceed the configured maximum backoff.
+      - The check after a normal run completion uses a much shorter delay than failure retries.
+    document:
+      - The base delay, the growth rule, and the continuation-check delay.
+
+  - name: Workspace naming scheme
+    freedom: >
+      The mapping from issue identifier to workspace directory name is free
+      (the reference sanitizes the identifier and appends a content hash when
+      sanitization changed it).
+    fixed_semantics:
+      - The mapping is deterministic and injective per the workspace-determinism invariant.
+      - Resulting names are safe for the target filesystem.
+    document:
+      - The exact derivation so external tooling can locate a workspace from an identifier.
+
+  - name: Process and supervision topology
+    freedom: >
+      Runs, timers, and the scheduler may be threads, processes, actors, or
+      tasks in any supervision arrangement.
+    fixed_semantics:
+      - A crashed run is always observed by the scheduler and enters retry or blocked handling.
+      - Stopping a run releases its session and its monitoring resources.
+    document:
+      - The supervision arrangement and how run termination is detected.
+
+  - name: Input-required signal recognition
+    freedom: >
+      The concrete protocol signals recognized as "the agent needs a human"
+      depend on the agent runtime dialect (the reference matches specific
+      event kinds, completion outcomes, and an elicitation method name).
+    fixed_semantics:
+      - Any signal meaning the session awaits operator input or approval must route to blocked handling, never to automatic retry.
+    document:
+      - The recognized signal set for the supported runtime dialect.
+
+  - name: Session telemetry extraction
+    freedom: >
+      How token usage and rate-limit data are located inside runtime payloads
+      is free; payload shapes vary by runtime version.
+    fixed_semantics:
+      - Extracted totals obey the monotonic token accounting invariant.
+    document:
+      - The payload shapes recognized for usage and rate-limit extraction.
+
+  - name: Remote transport
+    freedom: >
+      The remote-execution extension may use any transport that executes
+      commands and streams a session on the worker host (the reference uses
+      the system OpenSSH client, honoring an operator-supplied client
+      configuration and host:port shorthand).
+    fixed_semantics:
+      - Remote commands are bounded by timeouts.
+      - Remote workspace and hook semantics match the local ones.
+    document:
+      - The transport, its authentication expectations, and host addressing syntax.
+
+  - name: Log persistence
+    freedom: >
+      Any durable logging arrangement may be used (the reference rotates a
+      size-bounded on-disk log and silences the console in favor of the
+      terminal dashboard).
+    fixed_semantics:
+      - Failures, retries, blocks, releases, and hook failures are logged with issue context.
+    document:
+      - The log destination, rotation policy, and how to redirect it.
+
+  - name: Dashboard presentation
+    freedom: >
+      The layout, styling, and level of detail of the terminal and browser
+      dashboards are free.
+    fixed_semantics:
+      - Running, retrying, and blocked claims with their reasons remain visible.
+    document:
+      - What each dashboard column or field means.
+
+  - name: Adapter default state sets
+    freedom: >
+      Each tracker adapter may supply default active and terminal state sets
+      appropriate to its provider.
+    fixed_semantics:
+      - Defaults apply only after an adapter is selected; operator-configured sets always win.
+    document:
+      - Each shipped adapter's default state sets.

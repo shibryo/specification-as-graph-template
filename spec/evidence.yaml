@@ -1,0 +1,17 @@
+# Optional evidence register.
+#
+# The observe step records here what the specification actually used:
+# code locations, tests, documents, observed behavior, or an owner's
+# statement. Records cite entries by id via `evidence:` lists, and the
+# validator checks each invariant's `basis` against the cited kinds
+# (stated requires a test/doc/statement citation; derived requires a
+# recorded intent). In a recovered specification, invariants without
+# citations are warned about. Pin sources to a reference anchor in
+# reference.yaml so citations do not rot.
+#
+# Example entry:
+#   - id: evidence.example
+#     kind: code            # code | test | doc | behavior | statement
+#     source: path/to/file.ext:10-42 (function_name)
+#     note: What this evidence shows.
+evidence: []

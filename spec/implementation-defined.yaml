@@ -3,6 +3,8 @@ areas:
     freedom: Any persistence approach may be used.
     fixed_semantics:
       - Authoritative state remains unambiguous.
+    document:
+      - The selected persistence approach and the durability guarantees it provides.
 
   - name: Execution topology
     freedom: Responsibilities may be implemented in one or multiple execution units.

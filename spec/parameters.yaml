@@ -1,0 +1,22 @@
+# Optional operator contract layer.
+#
+# Parameters name the operator-settable behavior the subject must expose.
+# The existence and semantics of each parameter are normative; its concrete
+# name, format, and default are implementation-defined unless the value
+# itself is contractual. Each parameter must constrain at least one
+# behavior record. Delete this file if the subject has no operator-tunable
+# behavior.
+parameters:
+  - id: parameter.processing-capacity
+    name: Processing capacity
+    key: processing.capacity
+    controls: >
+      How many Requests may be processed concurrently.
+    semantics:
+      - Admission of new Requests never exceeds the configured capacity.
+      - Requests deferred by capacity are not lost; they remain eligible for later processing.
+    reload: >
+      Operator changes take effect for subsequent admission decisions without
+      restarting the subject.
+    constrains:
+      - interaction.process-request

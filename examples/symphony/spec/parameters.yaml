@@ -1,0 +1,390 @@
+# Operator contract. Keys are reference names used by this document; concrete
+# spellings, formats, and defaults are implementation-defined unless stated.
+# All parameters live in the workflow document and hot-reload per the
+# configuration chapter unless noted otherwise.
+parameters:
+  - id: parameter.polling-interval
+    name: Poll interval
+    key: polling.interval_ms
+    controls: >
+      How often the scheduler runs a poll cycle (reconcile plus dispatch).
+    semantics:
+      - Must be a positive duration.
+      - Each completed cycle schedules the next one after this interval.
+    reload: >
+      Changes apply when the next cycle schedules its successor, without restart.
+    constrains:
+      - interaction.poll-cycle
+
+  - id: parameter.tracker-kind
+    name: Tracker kind
+    key: tracker.kind
+    controls: >
+      Which tracker adapter the orchestrator uses.
+    semantics:
+      - Must name an adapter in the implementation's registry.
+      - Absent or unknown kinds fail configuration validation.
+    constrains:
+      - interface.tracker-adapter
+      - interaction.load-config
+
+  - id: parameter.tracker-provider
+    name: Tracker provider settings
+    key: tracker.provider
+    controls: >
+      Provider-specific connection settings - endpoint, project scope,
+      credentials, assignee identity - owned by the selected adapter.
+    semantics:
+      - Contents are adapter-defined; the adapter validates them at load time.
+      - Credential values may be environment references and resolve at load.
+      - Resolved credentials feed the adapter and its tools, never the agent environment.
+    constrains:
+      - interface.tracker-adapter
+      - invariant.secret-isolation
+
+  - id: parameter.tracker-active-states
+    name: Active tracker states
+    key: tracker.active_states
+    controls: >
+      The tracker state names that make an issue eligible for dispatch and
+      for turn continuation.
+    semantics:
+      - Matched case-insensitively after trimming.
+      - Adapters may supply provider-appropriate defaults.
+      - An issue outside these states is never dispatched and stops continuing.
+    constrains:
+      - interaction.poll-cycle
+      - interaction.dispatch-issue
+      - interaction.agent-run
+
+  - id: parameter.tracker-terminal-states
+    name: Terminal tracker states
+    key: tracker.terminal_states
+    controls: >
+      The tracker state names that mean an issue is finished and its
+      workspace reclaimable.
+    semantics:
+      - Matched case-insensitively after trimming.
+      - A terminal issue's agent stops, its claim releases, and its workspace is removed.
+      - Adapters may supply provider-appropriate defaults.
+    constrains:
+      - interaction.reconcile-claims
+      - interaction.cleanup-workspace
+
+  - id: parameter.tracker-required-labels
+    name: Required routing labels
+    key: tracker.required_labels
+    controls: >
+      Labels an issue must carry (all of them) to be routed to this
+      orchestrator.
+    semantics:
+      - Matched case-insensitively after trimming.
+      - An empty list requires nothing.
+      - Losing a required label mid-run stops the agent and releases the claim.
+    constrains:
+      - interaction.dispatch-issue
+      - interaction.reconcile-claims
+
+  - id: parameter.workspace-root
+    name: Workspace root
+    key: workspace.root
+    controls: >
+      The directory under which every per-issue workspace lives; the local
+      blast radius granted to agents.
+    semantics:
+      - Relative values resolve against the workflow document's directory.
+      - May be an environment reference.
+      - All workspace creation and removal is contained under this root.
+    constrains:
+      - interaction.create-workspace
+      - invariant.workspace-containment
+
+  - id: parameter.max-concurrent-agents
+    name: Global concurrency cap
+    key: agent.max_concurrent_agents
+    controls: >
+      The maximum number of agent runs executing concurrently.
+    semantics:
+      - Must be a positive integer.
+      - Admission never exceeds it; deferred issues stay eligible.
+    reload: >
+      Re-read every poll cycle; new admissions honor the new value.
+    constrains:
+      - interaction.dispatch-issue
+      - invariant.concurrency-caps
+
+  - id: parameter.max-concurrent-by-state
+    name: Per-state concurrency caps
+    key: agent.max_concurrent_agents_by_state
+    controls: >
+      Optional per-tracker-state overrides of the concurrency cap.
+    semantics:
+      - Keys are state names, matched case-insensitively; values are positive integers.
+      - A state without an override uses the global cap.
+    constrains:
+      - interaction.dispatch-issue
+      - invariant.concurrency-caps
+
+  - id: parameter.max-turns
+    name: Turn budget per run
+    key: agent.max_turns
+    controls: >
+      How many turns one agent run may execute before returning control to
+      the scheduler.
+    semantics:
+      - Must be a positive integer.
+      - Reaching the budget with the issue still active ends the run normally.
+    constrains:
+      - interaction.agent-run
+      - invariant.turn-bound
+
+  - id: parameter.max-retry-backoff
+    name: Maximum retry backoff
+    key: agent.max_retry_backoff_ms
+    controls: >
+      The upper bound on the delay between consecutive failure retries of one
+      issue.
+    semantics:
+      - Must be a positive duration.
+      - Failure retry delays grow up to and never beyond this value.
+    constrains:
+      - interaction.retry-issue
+      - invariant.bounded-backoff
+
+  - id: parameter.codex-command
+    name: Agent runtime command
+    key: codex.command
+    controls: >
+      The command line that launches the coding-agent runtime for each
+      session.
+    semantics:
+      - Must be non-blank.
+      - Runs with the workspace as working directory on the run's execution target.
+      - Operator-supplied arguments pass through to the runtime.
+    constrains:
+      - interface.agent-session-protocol
+
+  - id: parameter.approval-policy
+    name: Approval policy
+    key: codex.approval_policy
+    controls: >
+      How mid-turn approval requests are answered.
+    semantics:
+      - A dedicated auto-approve value grants approvals for the session automatically.
+      - Any other policy turns approval requests into blocking outcomes.
+      - Structured policy values pass through to the runtime unchanged.
+    constrains:
+      - interaction.handle-approvals
+
+  - id: parameter.thread-sandbox
+    name: Session sandbox mode
+    key: codex.thread_sandbox
+    controls: >
+      The sandbox mode declared for the whole agent session.
+    semantics:
+      - Passed to the runtime at session start.
+    constrains:
+      - interface.agent-session-protocol
+
+  - id: parameter.turn-sandbox-policy
+    name: Turn sandbox policy
+    key: codex.turn_sandbox_policy
+    controls: >
+      The filesystem and network policy applied to each turn.
+    semantics:
+      - When set, the operator's structured policy passes through unchanged.
+      - When unset, a default policy grants write access to the workspace only.
+      - The default's workspace path is canonicalized for local runs.
+    constrains:
+      - interface.agent-session-protocol
+      - interaction.agent-run
+
+  - id: parameter.turn-timeout
+    name: Turn inactivity timeout
+    key: codex.turn_timeout_ms
+    controls: >
+      How long a turn may stay silent before it is failed.
+    semantics:
+      - Must be a positive duration.
+      - Resets on every received stream event.
+    constrains:
+      - interaction.agent-run
+      - failure.turn-timeout
+
+  - id: parameter.read-timeout
+    name: Control response timeout
+    key: codex.read_timeout_ms
+    controls: >
+      How long the client waits for a direct protocol response during session
+      setup.
+    semantics:
+      - Must be a positive duration.
+      - Expiry fails the pending control operation.
+    constrains:
+      - interface.agent-session-protocol
+
+  - id: parameter.stall-timeout
+    name: Stall timeout
+    key: codex.stall_timeout_ms
+    controls: >
+      How long a running agent may go without observable session activity
+      before stall recovery acts.
+    semantics:
+      - Zero or negative disables stall detection.
+      - Expiry triggers restart-with-backoff, or blocking when input was requested.
+    constrains:
+      - interaction.stall-detection
+
+  - id: parameter.hook-after-create
+    name: Bootstrap hook
+    key: hooks.after_create
+    controls: >
+      The shell command that initializes a newly created workspace (for
+      example, cloning the repository).
+    semantics:
+      - Runs only when the workspace directory was newly created.
+      - Failure or timeout removes the fresh workspace and fails provisioning.
+    constrains:
+      - interaction.create-workspace
+
+  - id: parameter.hook-before-run
+    name: Pre-run hook
+    key: hooks.before_run
+    controls: >
+      The shell command run in the workspace before each agent session
+      starts.
+    semantics:
+      - Failure aborts the run before any session starts.
+    constrains:
+      - interaction.agent-run
+
+  - id: parameter.hook-after-run
+    name: Post-run hook
+    key: hooks.after_run
+    controls: >
+      The shell command run in the workspace after each agent run, on every
+      exit path.
+    semantics:
+      - Failures are logged and ignored.
+    constrains:
+      - interaction.agent-run
+
+  - id: parameter.hook-before-remove
+    name: Pre-removal hook
+    key: hooks.before_remove
+    controls: >
+      The shell command run in the workspace before it is removed (for
+      example, salvaging artifacts).
+    semantics:
+      - Failure or timeout never prevents the removal.
+    constrains:
+      - interaction.cleanup-workspace
+
+  - id: parameter.hook-timeout
+    name: Hook timeout
+    key: hooks.timeout_ms
+    controls: >
+      The shared execution timeout for every workspace hook.
+    semantics:
+      - Must be a positive duration.
+      - A timed-out hook is terminated and treated as failed per its hook point.
+    constrains:
+      - interface.workspace-hooks
+
+  - id: parameter.prompt-template
+    name: Prompt template
+    key: workflow.prompt_template
+    controls: >
+      The template rendered into each run's first-turn prompt; the operator's
+      entire tracker-workflow policy for the agent lives here.
+    semantics:
+      - Receives every issue field and the attempt number.
+      - Rendering is strict; unknown variables fail the run.
+      - Blank templates fall back to a documented built-in default.
+    constrains:
+      - interaction.agent-run
+      - interface.workflow-document
+
+  - id: parameter.ssh-hosts
+    name: Worker hosts
+    key: worker.ssh_hosts
+    conformance: extension
+    controls: >
+      The remote worker hosts on which workspaces and agent sessions run.
+    semantics:
+      - An empty list means local execution.
+      - Each entry names one reachable execution target.
+    constrains:
+      - interaction.remote-agent-run
+
+  - id: parameter.per-host-cap
+    name: Per-host concurrency cap
+    key: worker.max_concurrent_agents_per_host
+    conformance: extension
+    controls: >
+      The maximum concurrent agent runs on any single worker host.
+    semantics:
+      - Must be a positive integer when set; unset means unlimited per host.
+      - Host selection skips hosts at their cap; all-full defers dispatch.
+    constrains:
+      - interaction.remote-agent-run
+      - invariant.concurrency-caps
+
+  - id: parameter.dashboard-enabled
+    name: Terminal dashboard toggle
+    key: observability.dashboard_enabled
+    conformance: extension
+    controls: >
+      Whether the terminal status dashboard renders.
+    semantics:
+      - Disabling stops rendering without affecting scheduling or the API.
+    constrains:
+      - interaction.observe-status
+
+  - id: parameter.dashboard-refresh
+    name: Dashboard refresh cadence
+    key: observability.refresh_ms
+    conformance: extension
+    controls: >
+      The periodic re-render cadence of the terminal dashboard.
+    semantics:
+      - Must be a positive duration.
+    constrains:
+      - interaction.observe-status
+
+  - id: parameter.render-interval
+    name: Render coalescing interval
+    key: observability.render_interval_ms
+    conformance: extension
+    controls: >
+      The minimum spacing between dashboard renders when updates arrive
+      rapidly.
+    semantics:
+      - Must be a positive duration.
+      - Bursts of updates coalesce into one render per interval.
+    constrains:
+      - interaction.observe-status
+
+  - id: parameter.server-port
+    name: Observability server port
+    key: server.port
+    conformance: extension
+    controls: >
+      The TCP port for the HTTP observability surface.
+    semantics:
+      - Unset disables the HTTP surface entirely.
+      - Zero requests an ephemeral port; the bound port is discoverable.
+      - An invocation-time override takes precedence over the document value.
+    constrains:
+      - interface.observability-api
+
+  - id: parameter.server-host
+    name: Observability bind host
+    key: server.host
+    conformance: extension
+    controls: >
+      The address the HTTP observability surface binds to.
+    semantics:
+      - Defaults to a loopback-only bind.
+    constrains:
+      - interface.observability-api

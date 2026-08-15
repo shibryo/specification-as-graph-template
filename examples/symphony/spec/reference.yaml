@@ -1,0 +1,30 @@
+reference_implementation:
+  normative: false
+  summary: >
+    The Elixir application under elixir/ in the openai/symphony repository,
+    pinned at commit 8001b52e3062495a16e520e4ceaf8f9de868c4d0 (2026-08-12).
+    All evidence citations in spec/evidence.yaml resolve against this
+    revision, relative to the elixir/ directory. It is one realization of
+    this specification and adds no requirements.
+  anchor:
+    repository: https://github.com/openai/symphony
+    revision: 8001b52e3062495a16e520e4ceaf8f9de868c4d0
+    path_root: elixir/
+  mapping:
+    - Scheduler -> SymphonyElixir.Orchestrator (GenServer holding the claim ledger).
+    - Configuration Authority -> SymphonyElixir.WorkflowStore, SymphonyElixir.Workflow, SymphonyElixir.Config and Config.Schema.
+    - Agent Run Supervisor -> SymphonyElixir.AgentRunner under a Task.Supervisor.
+    - Agent Session Protocol Client -> SymphonyElixir.Codex.AppServer (Codex app-server JSON-RPC over stdio).
+    - Tracker Adapter -> SymphonyElixir.Tracker behaviour with Linear, GitHub, GitLab, Jira, Asana, and Memory adapters.
+    - Workspace Manager -> SymphonyElixir.Workspace with SymphonyElixir.PathSafety.
+    - Observability Surface -> SymphonyElixir.StatusDashboard (terminal) and SymphonyElixirWeb (Phoenix LiveView dashboard and JSON API).
+    - Remote execution -> SymphonyElixir.SSH wrapping the system OpenSSH client.
+  reference_specific_choices:
+    - Elixir/OTP supervision, GenServer timers, and Task monitors as the concurrency substrate.
+    - Markdown-with-YAML-front-matter document syntax and Liquid (Solid) prompt templating.
+    - Ecto embedded schemas for settings validation.
+    - Codex app-server as the agent runtime and its JSON-RPC dialect.
+    - Phoenix, Bandit, and LiveView for the HTTP observability surface, with embedded static assets.
+    - Burrito/escript packaging and the exact CLI flag spellings.
+    - Repository development tooling (mix specs.check, mix pr_body.check, mix workspace.before_remove) that supports the shipped WORKFLOW.md but is not part of the orchestrator contract.
+    - The shipped WORKFLOW.md prompt encoding one team's Linear workflow policy.

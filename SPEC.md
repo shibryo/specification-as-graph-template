@@ -7,6 +7,38 @@ Version: 0.1.0
 
 ---
 
+## Normative Language
+
+The key words below carry the stated meaning wherever they appear in this specification.
+
+- **MUST** — required for conformance.
+- **MUST NOT** — prohibited for conformance.
+- **SHOULD** — expected unless there is a justified reason to deviate.
+- **SHOULD NOT** — normally avoided unless justified.
+- **MAY** — optional.
+- **Implementation-defined** — variable within constraints stated by this specification.
+- **Unspecified** — consumers must not rely on the behavior.
+
+## How to Read This Specification
+
+This specification serves two implementation styles.
+
+To implement by transcription, use the scan path:
+
+- The Configuration Specification and its cheat sheet name every required field.
+- Concept field lists give the data contract.
+- The Test and Validation Matrix lists the checks an implementation must pass.
+- The Implementation Checklist is the definition of done.
+
+To implement by reconstruction, read in order:
+
+- The Problem Statement and Design Intent say why the subject exists.
+- The System Model defines the concepts and who owns each decision.
+- The chapters walk through behavior end to end.
+- Invariants and failures state what must survive your design choices.
+
+Both paths are projections of the same records. They cannot disagree.
+
 ## Problem Statement
 
 Describe the environment, assumptions, and forces needed to understand the subject.
@@ -34,15 +66,13 @@ Explain which design knowledge, guarantees, or boundaries would otherwise be los
 
 Conforming implementations should be free to vary internally while preserving externally meaningful behavior and the relationships between core concepts.
 
-**Why it matters**
-
 Reproducing implementation details is not the same as preserving the system.
 
-**Implications**
+Implications:
 
 - Normative statements should describe semantics before mechanisms.
 
-**Trade-offs**
+Notes:
 
 - Some implementation freedom is intentionally left unresolved by the specification.
 
@@ -54,7 +84,10 @@ Reproducing implementation details is not the same as preserving the system.
 
 A unit of intent submitted to the subject for processing.
 
-- Has stable identity for the duration required by the specification.
+Fields:
+
+- `id` (string) — REQUIRED. Stable identity for the duration required by the specification.
+
 
 #### Result
 
@@ -80,9 +113,29 @@ It does not own:
 
 - Implementation choices explicitly declared implementation-defined.
 
-Normative ownership semantics:
+Requirements:
 
 - A conforming implementation MUST make processing ownership unambiguous.
+
+## Configuration Specification
+
+Each field below must exist and be operator-settable. Keys are reference names used by this document, not required spellings. Concrete names, formats, and defaults are implementation-defined unless fixed elsewhere. The stated semantics are normative.
+
+### `processing.capacity` — Processing capacity
+
+How many Requests may be processed concurrently.
+
+- Admission of new Requests never exceeds the configured capacity.
+- Requests deferred by capacity are not lost; they remain eligible for later processing.
+- Operator changes take effect for subsequent admission decisions without restarting the subject.
+
+Used by **Process Request**.
+
+### Config Fields Summary (Cheat Sheet)
+
+One line per field. Generated from the same records as the full entries above.
+
+- `processing.capacity` — How many Requests may be processed concurrently.
 
 ## 1. Request Processing
 
@@ -94,19 +147,19 @@ Describe the end-to-end interaction that turns an accepted Request into a Result
 
 Participants: **Request**, **Request Processing**, **Result**.
 
-The interaction begins when a request is accepted for processing.
+Trigger: A Request is accepted for processing.
 
-Before it begins:
+Preconditions:
 
 - The Request satisfies all required validity conditions.
 
-The interaction proceeds as follows:
+Sequence:
 
 1. **Request Processing** Determine whether the Request can be processed under the current state and policy.
 2. **Request Processing** Perform the required semantic operation.
 3. **Request Processing** Expose the resulting outcome.
 
-On completion:
+Postconditions:
 
 - The outcome is observable as either a Result or a defined failure.
 
@@ -114,21 +167,25 @@ On completion:
 
 Constrained by **Outcome Is Unambiguous**.
 
-Defined failures: **Processing Interrupted**.
+Failures: **Processing Interrupted**.
+
+Validation checks:
+
+- Submit a valid Request and verify exactly one unambiguous outcome (a Result or a defined failure) becomes observable.
 
 ### Example Interface
 
 Describe an externally meaningful interaction boundary.
 
-**Input semantics**
+Input semantics:
 
 - Replace with the meaning required of valid input.
 
-**Output semantics**
+Output semantics:
 
 - Replace with the meaning guaranteed by output.
 
-**Failure semantics**
+Failure semantics:
 
 - Replace with defined failure behavior.
 
@@ -161,15 +218,13 @@ The lifecycle begins in **Accepted**.
 
 For a given logical Request, the authoritative externally observable outcome does not simultaneously represent mutually exclusive terminal states.
 
-**Intent**
-
 Consumers should not need to infer which incompatible outcome is authoritative.
 
-**This prevents**
+This prevents:
 
 - Conflicting terminal outcomes for the same logical Request.
 
-**Verification**
+Validation checks:
 
 - Attempt conflicting terminal transitions and verify that only one becomes authoritative.
 
@@ -179,15 +234,13 @@ Processing stops before a successful terminal outcome becomes authoritative.
 
 Occurs during **Process Request**.
 
-Retryability is **implementation-defined**.
+Retryable: implementation-defined.
 
-**Required behavior**
+Requirements:
 
 - Preserve enough information to avoid an ambiguous terminal outcome.
 
-**Recovery**
-
-The implementation may retry, resume, compensate, or fail terminally, provided the resulting authoritative state satisfies all invariants.
+Recovery: The implementation may retry, resume, compensate, or fail terminally, provided the resulting authoritative state satisfies all invariants.
 
 ## Implementation-Defined Areas
 
@@ -198,6 +251,10 @@ Any persistence approach may be used.
 Fixed semantics:
 
 - Authoritative state remains unambiguous.
+
+A conforming implementation must document:
+
+- The selected persistence approach and the durability guarantees it provides.
 
 ### Execution topology
 
@@ -213,6 +270,29 @@ Describe the current or example implementation here if one exists. It is one rea
 
 The reference implementation is **not normative**; it is one realization of this specification.
 
+## Test and Validation Matrix
+
+Checks assembled from the verification clauses of this specification. A conforming implementation should be able to demonstrate each of them. Checks under an optional extension apply only when that extension is implemented.
+
+### 1. Request Processing
+
+- **Process Request** — Submit a valid Request and verify exactly one unambiguous outcome (a Result or a defined failure) becomes observable.
+- **Outcome Is Unambiguous** — Attempt conflicting terminal transitions and verify that only one becomes authoritative.
+
+## Implementation Checklist (Definition of Done)
+
+Generated from the specification graph. Intentionally redundant with the body.
+
+### Core
+
+- Interactions: **Process Request**.
+- Lifecycle: implement every state and transition of the lifecycle.
+- Interfaces: **Example Interface**.
+- Invariants: **Outcome Is Unambiguous**.
+- Failure semantics: **Processing Interrupted**.
+- Configuration fields: `processing.capacity`.
+- Documentation: record the selected behavior for every implementation-defined area.
+
 ## Conformance
 
 Implement a conforming realization of this specification. Preserve normative semantics and design intent. Do not infer additional constraints from the reference implementation. Where behavior is implementation-defined, choose a reasonable mechanism that preserves all stated invariants.
@@ -223,5 +303,7 @@ A conforming implementation:
 - preserves conceptual relationships and responsibility boundaries.
 - implements the defined interactions and lifecycle semantics.
 - preserves invariants and defined failure behavior.
+- exposes every field in the configuration specification with its stated semantics.
 - may choose different mechanisms where implementation freedom is declared.
+- documents its selected behavior for every implementation-defined area.
 - does not treat reference-specific choices as additional requirements.

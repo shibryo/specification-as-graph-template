@@ -5,7 +5,11 @@ import argparse, sys, yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = ['manifest.yaml','intent.yaml','model.yaml','responsibilities.yaml','interactions.yaml','lifecycle.yaml','interfaces.yaml','invariants.yaml','failures.yaml','implementation-defined.yaml','reference.yaml']
-OPTIONAL_FILES = ['chapters.yaml']
+OPTIONAL_FILES = ['chapters.yaml','parameters.yaml','evidence.yaml']
+CONFORMANCE_LEVELS = {'core','extension'}
+STANCES = {'recovered','owned'}
+BASES = {'observed','stated','derived'}
+EVIDENCE_KINDS = {'code','test','doc','behavior','statement'}
 
 def load(spec_dir):
     docs = {}
@@ -42,6 +46,33 @@ def sent(v):
     return s if not s or s[-1] in '.!?:;' else s + '.'
 
 def bullets(xs): return [f'- {sent(x)}' for x in xs]
+
+def ext_suffix(x): return ' (Optional Extension)' if x.get('conformance') == 'extension' else ''
+
+def refkey(p): return p.get('key') or p.get('name', p['id'])
+
+def example_lines(x):
+    L = []
+    for ex in x.get('examples', []):
+        if isinstance(ex, str): ex = {'body': ex}
+        title = ex.get('title')
+        L += [f"Example{': ' + title if title else ''}:", '', f"```{ex.get('lang','text')}"]
+        L += str(ex.get('body', '')).rstrip().split('\n') + ['```', '']
+    return L
+
+def attribute_lines(c):
+    attrs = c.get('attributes', [])
+    if not attrs: return []
+    L = ['Fields:', '']
+    for a in attrs:
+        typ = f" ({a['type']})" if a.get('type') else ''
+        req = 'REQUIRED. ' if a.get('required') else ''
+        L.append(f"- `{a.get('name')}`{typ} — {req}{sent(a.get('meaning'))}")
+    return L + ['']
+
+def ext_note(x):
+    if x.get('conformance') != 'extension': return []
+    return ['This is an optional extension. A conforming implementation may omit it entirely. When implemented, its semantics are normative in full.','']
 
 def validate(d):
     idx, errors = make_index(d); warnings = []; ids = set(idx)
@@ -88,6 +119,56 @@ def validate(d):
     for f in fails:
         if not f.get('occurs_during') or not f.get('required_behavior'): errors.append(f"{f.get('id')}: failure is incomplete")
         if interactions and f.get('id') not in used_f: errors.append(f"{f.get('id')}: failure is disconnected")
+    for p in d['parameters.yaml'].get('parameters', []):
+        pid = p.get('id')
+        if not p.get('name') or not p.get('controls') or not p.get('semantics'): errors.append(f'{pid}: parameter needs name, controls, semantics')
+        if not p.get('constrains'): errors.append(f'{pid}: parameter must constrain at least one record')
+        for ref in p.get('constrains', []):
+            if ref not in ids: errors.append(f'{pid}: constrains unknown reference {ref}')
+    for item in all_records(d):
+        c = item.get('conformance')
+        if c is not None and c not in CONFORMANCE_LEVELS: errors.append(f"{item.get('id')}: invalid conformance value {c!r}")
+        for a in item.get('attributes', []):
+            if not isinstance(a, dict) or not a.get('name') or not a.get('meaning'): errors.append(f"{item.get('id')}: attribute needs name and meaning")
+        for ex in item.get('examples', []):
+            if isinstance(ex, dict) and not ex.get('body'): errors.append(f"{item.get('id')}: example needs body")
+    for it in interactions:
+        if not it.get('verification'): warnings.append(f"{it.get('id')}: interaction has no verification; it is absent from the verification matrix")
+    for inv in invs:
+        if not inv.get('verification'): warnings.append(f"{inv.get('id')}: invariant has no verification; it is absent from the verification matrix")
+    stance = d['manifest.yaml'].get('specification', {}).get('stance')
+    if stance is not None and stance not in STANCES: errors.append(f'manifest: invalid stance {stance!r}')
+    evidence = [e for e in d['evidence.yaml'].get('evidence', []) if isinstance(e, dict)]
+    kind_by_evidence = {}
+    for e in evidence:
+        eid = e.get('id')
+        if not e.get('kind') or not e.get('source'): errors.append(f'{eid}: evidence needs kind and source')
+        elif e.get('kind') not in EVIDENCE_KINDS: errors.append(f"{eid}: invalid evidence kind {e.get('kind')!r}")
+        kind_by_evidence[eid] = e.get('kind')
+    for item in all_records(d):
+        for ref in item.get('evidence', []):
+            if ref not in kind_by_evidence: errors.append(f"{item.get('id')}: unknown evidence reference {ref}")
+    for inv in invs:
+        basis = inv.get('basis')
+        refs = inv.get('evidence', [])
+        cited_kinds = {kind_by_evidence.get(r) for r in refs}
+        if basis is None: warnings.append(f"{inv.get('id')}: invariant has no basis; record whether it is observed, stated, or derived")
+        elif basis not in BASES: errors.append(f"{inv.get('id')}: invalid basis {basis!r}")
+        elif basis == 'observed': warnings.append(f"{inv.get('id')}: basis is observed only; confirm the mechanism is contractual or move it to implementation-defined")
+        elif basis == 'stated' and not (cited_kinds & {'test','doc','statement'}): errors.append(f"{inv.get('id')}: basis is stated but no cited evidence is a test, doc, or statement")
+        elif basis == 'derived' and not inv.get('intent'): errors.append(f"{inv.get('id')}: basis is derived but the invariant records no intent (the semantic-necessity argument)")
+        if stance == 'recovered' and not refs: warnings.append(f"{inv.get('id')}: recovered specification; cite evidence for this invariant in spec/evidence.yaml")
+    STYLE_FIELDS = ['properties','semantics','prevents','required_behavior','fixed_semantics','document','input_semantics','output_semantics','failure_semantics','implementation_defined','preconditions','postconditions','owns','must_not_own','normative','implications','tradeoffs']
+    STYLE_MAX_WORDS = 28
+    for item in all_records(d):
+        for field in STYLE_FIELDS:
+            for entry in item.get(field, []):
+                if isinstance(entry, str) and len(entry.split()) > STYLE_MAX_WORDS:
+                    warnings.append(f"{item.get('id')}: style: {field} item has {len(entry.split())} words; split it into one fact per bullet")
+        for req in item.get('requirements', []):
+            stmt = req.get('statement','') if isinstance(req, dict) else ''
+            if len(str(stmt).split()) > STYLE_MAX_WORDS:
+                warnings.append(f"{item.get('id')}: style: requirement statement has {len(str(stmt).split())} words; simplify it")
     if not concepts: errors.append('whole-system: at least one concept is required')
     if len(concepts)>1 and not model.get('relationships'): errors.append('whole-system: concepts need relationships')
     if not rs: errors.append('whole-system: at least one responsibility is required')
@@ -120,20 +201,22 @@ def validate(d):
     return errors, warnings
 
 def interaction_lines(it, idx, h):
-    L = [f"{h} {it.get('name',it['id'])}",'',sent(it.get('purpose')),'']
+    L = [f"{h} {it.get('name',it['id'])}{ext_suffix(it)}",'',sent(it.get('purpose')),'']+ext_note(it)
     ps=[label(x,idx) for x in it.get('participants',[])]
     if ps: L += ['Participants: '+', '.join(f'**{x}**' for x in ps)+'.','']
-    if it.get('trigger'): L+=['The interaction begins when '+sent(it['trigger']).lower(),'']
-    if it.get('preconditions'): L+=['Before it begins:','']+bullets(it['preconditions'])+['']
+    if it.get('trigger'): L+=[f"Trigger: {sent(it['trigger'])}",'']
+    if it.get('preconditions'): L+=['Preconditions:','']+bullets(it['preconditions'])+['']
     if it.get('sequence'):
-        L+=['The interaction proceeds as follows:','']
+        L+=['Sequence:','']
         for n,s in enumerate(it['sequence'],1): L += [f"{n}. **{label(s.get('actor',''),idx)}** {sent(s.get('action'))}"]
         L+=['']
-    if it.get('postconditions'): L+=['On completion:','']+bullets(it['postconditions'])+['']
+    if it.get('postconditions'): L+=['Postconditions:','']+bullets(it['postconditions'])+['']
     for req in it.get('requirements',[]): L += [f"- **{str(req.get('level','must')).upper().replace('_',' ')}** — {sent(req.get('statement'))}"]
     if it.get('requirements'): L+=['']
     if it.get('invariants'): L+=['Constrained by '+', '.join(f"**{label(x,idx)}**" for x in it['invariants'])+'.','']
-    if it.get('failures'): L+=['Defined failures: '+', '.join(f"**{label(x,idx)}**" for x in it['failures'])+'.','']
+    if it.get('failures'): L+=['Failures: '+', '.join(f"**{label(x,idx)}**" for x in it['failures'])+'.','']
+    if it.get('algorithm'): L+=['Reference algorithm (non-normative):','','```text']+str(it['algorithm']).rstrip().split('\n')+['```','']
+    if it.get('verification'): L+=['Validation checks:','']+bullets(it['verification'])+['']
     return L
 
 def lifecycle_lines(life, idx, h):
@@ -148,41 +231,154 @@ def lifecycle_lines(life, idx, h):
     return L
 
 def interface_lines(x, h):
-    L = [f"{h} {x.get('name',x['id'])}",'',sent(x.get('purpose')),'']
+    L = [f"{h} {x.get('name',x['id'])}{ext_suffix(x)}",'',sent(x.get('purpose')),'']+ext_note(x)
     for title,key in [('Input semantics','input_semantics'),('Output semantics','output_semantics'),('Failure semantics','failure_semantics')]:
-        if x.get(key): L += [f'**{title}**','']+bullets(x[key])+['']
+        if x.get(key): L += [f'{title}:','']+bullets(x[key])+['']
     if x.get('implementation_defined'): L += ['Implementation-defined mechanisms:','']+bullets(x['implementation_defined'])+['']
+    L += example_lines(x)
+    if x.get('verification'): L+=['**Verification**','']+bullets(x['verification'])+['']
+    return L
+
+def parameter_lines(p, idx, h):
+    title = f"`{p['key']}` — {p.get('name',p['id'])}" if p.get('key') else p.get('name',p['id'])
+    L = [f"{h} {title}",'',sent(p.get('controls')),'']
+    items = list(p.get('semantics',[]))
+    if p.get('reload'): items.append(p['reload'])
+    if items: L += bullets(items)+['']
+    if p.get('constrains'): L += ['Used by '+', '.join(f"**{label(x,idx)}**" for x in p['constrains'])+'.','']
+    L += example_lines(p)
+    return L
+
+def cheatsheet_lines(params):
+    L = ['### Config Fields Summary (Cheat Sheet)','','One line per field. Generated from the same records as the full entries above.','']
+    for p in params:
+        controls = ' '.join(str(p.get('controls','')).split())
+        first = controls.split('. ')[0].rstrip('.')
+        L.append(f"- `{refkey(p)}` — {sent(first)}")
+    return L + ['']
+
+def checklist_lines(d, params):
+    def split(xs): return [x for x in xs if x.get('conformance')!='extension'], [x for x in xs if x.get('conformance')=='extension']
+    def names(xs): return ', '.join(f"**{x.get('name',x['id'])}**" for x in xs)
+    ic,ie = split(d['interactions.yaml'].get('interactions',[]))
+    xc,xe = split(d['interfaces.yaml'].get('interfaces',[]))
+    vc,ve = split(d['invariants.yaml'].get('invariants',[]))
+    fc,fe = split(d['failures.yaml'].get('failures',[]))
+    pc,pe = split(params)
+    if not (ic or xc or vc or fc or pc): return []
+    L = ['## Implementation Checklist (Definition of Done)','','Generated from the specification graph. Intentionally redundant with the body.','','### Core','']
+    if ic: L.append(f'- Interactions: {names(ic)}.')
+    if d['lifecycle.yaml'].get('states'): L.append('- Lifecycle: implement every state and transition of the lifecycle.')
+    if xc: L.append(f'- Interfaces: {names(xc)}.')
+    if vc: L.append(f'- Invariants: {names(vc)}.')
+    if fc: L.append(f'- Failure semantics: {names(fc)}.')
+    if pc: L.append('- Configuration fields: '+', '.join(f'`{refkey(p)}`' for p in pc)+'.')
+    L.append('- Documentation: record the selected behavior for every implementation-defined area.')
+    L.append('')
+    ext = ie+xe+ve+fe
+    if ext or pe:
+        L += ['### Optional extensions (normative in full when implemented)','']
+        L += [f"- **{x.get('name',x['id'])}**" for x in ext]
+        L += [f"- `{refkey(p)}`" for p in pe]
+        L.append('')
     return L
 
 def invariant_lines(x, h):
     L = [f"{h} {x.get('name',x['id'])}",'',sent(x.get('statement')),'']
-    if x.get('intent'): L+=['**Intent**','',sent(x['intent']),'']
-    if x.get('prevents'): L+=['**This prevents**','']+bullets(x['prevents'])+['']
-    if x.get('verification'): L+=['**Verification**','']+bullets(x['verification'])+['']
+    if x.get('intent'): L+=[sent(x['intent']),'']
+    if x.get('prevents'): L+=['This prevents:','']+bullets(x['prevents'])+['']
+    if x.get('verification'): L+=['Validation checks:','']+bullets(x['verification'])+['']
     return L
 
 def failure_lines(x, idx, h):
-    L = [f"{h} {x.get('name',x['id'])}",'',sent(x.get('meaning')),'']
+    L = [f"{h} {x.get('name',x['id'])}{ext_suffix(x)}",'',sent(x.get('meaning')),'']+ext_note(x)
     if x.get('occurs_during'): L += ['Occurs during '+', '.join(f"**{label(r,idx)}**" for r in x['occurs_during'])+'.','']
-    L += [f"Retryability is **{x.get('retryable','unspecified')}**.",'']
-    if x.get('required_behavior'): L+=['**Required behavior**','']+bullets(x['required_behavior'])+['']
-    if x.get('recovery'): L+=['**Recovery**','',sent(x['recovery']),'']
+    L += [f"Retryable: {x.get('retryable','unspecified')}.",'']
+    if x.get('required_behavior'): L+=['Requirements:','']+bullets(x['required_behavior'])+['']
+    if x.get('recovery'): L+=[f"Recovery: {sent(x['recovery'])}",'']
+    if x.get('verification'): L+=['Validation checks:','']+bullets(x['verification'])+['']
+    return L
+
+def stance_lines(m):
+    stance = m.get('stance')
+    if stance == 'recovered':
+        return ['Provenance: recovered from an existing implementation. Where the evidence was behavior alone, mechanisms default to implementation-defined.','']
+    if stance == 'owned':
+        return ["Provenance: authored by the subject's owners. Fixed mechanisms are deliberate contract.",'']
+    return []
+
+def reading_guide_lines(d, params):
+    scan, deep = [], []
+    if params: scan.append('The Configuration Specification and its cheat sheet name every required field.')
+    if any(c.get('attributes') for c in d['model.yaml'].get('concepts', [])): scan.append('Concept field lists give the data contract.')
+    if any(x.get('verification') for x in d['interactions.yaml'].get('interactions', []) + d['invariants.yaml'].get('invariants', [])): scan.append('The Test and Validation Matrix lists the checks an implementation must pass.')
+    scan.append('The Implementation Checklist is the definition of done.')
+    if any(x.get('examples') for x in d['interfaces.yaml'].get('interfaces', []) + d['parameters.yaml'].get('parameters', [])) or any(x.get('algorithm') for x in d['interactions.yaml'].get('interactions', [])):
+        scan.append('Examples and reference algorithms show one concrete shape. They are informative, not normative.')
+    deep += ['The Problem Statement and Design Intent say why the subject exists.','The System Model defines the concepts and who owns each decision.']
+    deep.append('The chapters walk through behavior end to end.' if d['chapters.yaml'].get('chapters') else 'The interaction, lifecycle, and interface sections walk through behavior end to end.')
+    deep.append('Invariants and failures state what must survive your design choices.')
+    L = ['## How to Read This Specification','','This specification serves two implementation styles.','','To implement by transcription, use the scan path:','']
+    L += bullets(scan) + ['','To implement by reconstruction, read in order:',''] + bullets(deep)
+    L += ['','Both paths are projections of the same records. They cannot disagree.','']
+    return L
+
+def normative_language_lines(m_all):
+    nl = m_all.get('normative_language')
+    if not nl: return []
+    order = ['must','must_not','should','should_not','may','implementation_defined','unspecified']
+    keys = [k for k in order if k in nl] + [k for k in nl if k not in order]
+    L = ['## Normative Language','','The key words below carry the stated meaning wherever they appear in this specification.','']
+    for k in keys:
+        disp = k.upper().replace('_',' ') if k in ('must','must_not','should','should_not','may') else k.replace('_','-').capitalize()
+        L.append(f'- **{disp}** — {sent(nl[k])}')
+    return L + ['']
+
+def verification_matrix_lines(d, idx):
+    chapters = d['chapters.yaml'].get('chapters', [])
+    behavior = []
+    for key, coll in [('interactions.yaml','interactions'),('interfaces.yaml','interfaces'),('invariants.yaml','invariants'),('failures.yaml','failures')]:
+        behavior += [x for x in d[key].get(coll, []) if isinstance(x, dict) and x.get('verification')]
+    if not behavior: return []
+    by_id = {x['id']: x for x in behavior}
+    def rows(items):
+        out = []
+        for x in items:
+            for v in x.get('verification', []): out.append(f"- **{x.get('name', x['id'])}** — {sent(v)}")
+        return out
+    L = ['## Test and Validation Matrix','','Checks assembled from the verification clauses of this specification. A conforming implementation should be able to demonstrate each of them. Checks under an optional extension apply only when that extension is implemented.','']
+    if chapters:
+        emitted = set()
+        for n, ch in enumerate(chapters, 1):
+            items = [by_id[ref] for ref in ch.get('contains', []) if ref in by_id]
+            if not items: continue
+            emitted.update(x['id'] for x in items)
+            L += [f"### {n}. {ch.get('name', ch.get('id'))}{ext_suffix(ch)}", ''] + rows(items) + ['']
+        rest = [x for x in behavior if x['id'] not in emitted]
+        if rest: L += ['### General', ''] + rows(rest) + ['']
+    else:
+        L += rows(behavior) + ['']
     return L
 
 def render(d):
     idx,_=make_index(d); m=d['manifest.yaml']['specification']; intent=d['intent.yaml']; model=d['model.yaml']; rs=d['responsibilities.yaml'].get('responsibilities',[]); its=d['interactions.yaml'].get('interactions',[]); life=d['lifecycle.yaml']
     ifaces=d['interfaces.yaml'].get('interfaces',[]); invs=d['invariants.yaml'].get('invariants',[]); fails=d['failures.yaml'].get('failures',[]); chapters=d['chapters.yaml'].get('chapters',[])
-    L=[f"# {m['name']} Specification",'',"> GENERATED FROM `spec/`. DO NOT EDIT DIRECTLY.",'',f"Status: {m.get('status','draft')}  ",f"Version: {m.get('version','0.1.0')}",'','---','']
+    params=d['parameters.yaml'].get('parameters',[])
+    L=[f"# {m['name']} Specification",'',"> GENERATED FROM `spec/`. DO NOT EDIT DIRECTLY.",'',f"Status: {m.get('status','draft')}  ",f"Version: {m.get('version','0.1.0')}",'']
+    L+=stance_lines(m)
+    L+=['---','']
+    L+=normative_language_lines(d['manifest.yaml'])
+    L+=reading_guide_lines(d,params)
     L+=['## Problem Statement','',sent(intent.get('context')),'',sent(intent.get('problem')),'']
     if intent.get('why_specification_exists'): L+=['### Why This Specification Exists','',sent(intent['why_specification_exists']),'']
     L+=['## Goals and Non-Goals','','### Goals','']+bullets(intent.get('goals',[]))+['','### Non-Goals','']+bullets(intent.get('non_goals',[]))+['','## Design Intent','']
     for x in intent.get('design_intents',[]):
         L+=[f"### {x.get('name','Intent')}",'',sent(x.get('intent')),'']
-        if x.get('why_it_matters'): L+=['**Why it matters**','',sent(x['why_it_matters']),'']
-        if x.get('implications'): L+=['**Implications**','']+bullets(x['implications'])+['']
-        if x.get('tradeoffs'): L+=['**Trade-offs**','']+bullets(x['tradeoffs'])+['']
+        if x.get('why_it_matters'): L+=[sent(x['why_it_matters']),'']
+        if x.get('implications'): L+=['Implications:','']+bullets(x['implications'])+['']
+        if x.get('tradeoffs'): L+=['Notes:','']+bullets(x['tradeoffs'])+['']
     L+=['## System Model','','### Core Concepts','']
-    for c in model.get('concepts',[]): L += [f"#### {c.get('name',c['id'])}",'',sent(c.get('meaning')),'']+bullets(c.get('properties',[]))+['']
+    for c in model.get('concepts',[]): L += [f"#### {c.get('name',c['id'])}",'',sent(c.get('meaning')),'']+attribute_lines(c)+bullets(c.get('properties',[]))+['']
     if model.get('relationships'):
         L+=['### Concept Relationships','']
         for r in model['relationships']: L += [f"**{label(r['subject'],idx)}** {r.get('relation','relates to').replace('_',' ')} **{label(r['object'],idx)}**. {sent(r.get('meaning'))}",'']
@@ -191,13 +387,18 @@ def render(d):
         L += [f"#### {r.get('name',r['id'])}",'',sent(r.get('purpose')),'']
         if r.get('owns'): L+=['It owns:','']+bullets(r['owns'])+['']
         if r.get('must_not_own'): L+=['It does not own:','']+bullets(r['must_not_own'])+['']
-        if r.get('normative'): L+=['Normative ownership semantics:','']+bullets(r['normative'])+['']
+        if r.get('normative'): L+=['Requirements:','']+bullets(r['normative'])+['']
+    if params:
+        L+=['## Configuration Specification','','Each field below must exist and be operator-settable. Keys are reference names used by this document, not required spellings. Concrete names, formats, and defaults are implementation-defined unless fixed elsewhere. The stated semantics are normative.','']
+        for p in params: L+=parameter_lines(p,idx,'###')
+        L+=cheatsheet_lines(params)
     iids={x['id'] for x in its}; vids={x['id'] for x in invs}; fids={x['id'] for x in fails}; xids={x['id'] for x in ifaces}
     if chapters:
         assigned=set(); life_claimed=False
         for n,ch in enumerate(chapters,1):
-            L+=[f"## {n}. {ch.get('name',ch.get('id'))}",'']
+            L+=[f"## {n}. {ch.get('name',ch.get('id'))}{ext_suffix(ch)}",'']
             if ch.get('overview'): L+=[sent(ch['overview']),'']
+            L+=ext_note(ch)
             for ref in ch.get('contains',[]):
                 if ref=='lifecycle':
                     life_claimed=True
@@ -232,10 +433,16 @@ def render(d):
     for x in d['implementation-defined.yaml'].get('areas',[]):
         L += [f"### {x.get('name','Area')}",'',sent(x.get('freedom')),'']
         if x.get('fixed_semantics'): L+=['Fixed semantics:','']+bullets(x['fixed_semantics'])+['']
+        if x.get('document'): L+=['A conforming implementation must document:','']+bullets(x['document'])+['']
     ref=d['reference.yaml'].get('reference_implementation',{})
     L+=['## Reference Implementation','',sent(ref.get('summary','No reference implementation is defined.')),'']
     if ref.get('normative') is False: L+=['The reference implementation is **not normative**; it is one realization of this specification.','']
-    L+=['## Conformance','',sent(d['manifest.yaml'].get('implementation_instruction')),'','A conforming implementation:','']+bullets(['satisfies applicable normative semantics','preserves conceptual relationships and responsibility boundaries','implements the defined interactions and lifecycle semantics','preserves invariants and defined failure behavior','may choose different mechanisms where implementation freedom is declared','does not treat reference-specific choices as additional requirements'])+['']
+    L+=verification_matrix_lines(d,idx)
+    L+=checklist_lines(d,params)
+    conf=['satisfies applicable normative semantics','preserves conceptual relationships and responsibility boundaries','implements the defined interactions and lifecycle semantics','preserves invariants and defined failure behavior','may choose different mechanisms where implementation freedom is declared','documents its selected behavior for every implementation-defined area','does not treat reference-specific choices as additional requirements']
+    if params: conf.insert(4,'exposes every field in the configuration specification with its stated semantics')
+    if any(x.get('conformance')=='extension' for x in all_records(d)): conf.append('may omit optional extensions entirely; every implemented extension is normative in full')
+    L+=['## Conformance','',sent(d['manifest.yaml'].get('implementation_instruction')),'','A conforming implementation:','']+bullets(conf)+['']
     return '\n'.join(L).rstrip()+'\n'
 
 def main():

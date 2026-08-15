@@ -1,0 +1,120 @@
+chapters:
+  - id: chapter.configuration
+    name: Configuration and Reload
+    overview: >
+      How operator intent enters the system: one workflow document, strict
+      validation at startup, hot reload while running, and the last-known-good
+      guarantee that protects mid-run agents from bad edits.
+    contains:
+      - interface.workflow-document
+      - interface.cli
+      - interaction.load-config
+      - interaction.reload-config
+      - invariant.valid-config-to-run
+      - failure.config-invalid-at-startup
+      - failure.config-reload-invalid
+
+  - id: chapter.scheduling
+    name: Scheduling and Dispatch
+    overview: >
+      The poll cycle that turns active tracker issues into supervised agent
+      runs: candidate ordering, eligibility, the claim as duplication guard,
+      capacity limits, and last-moment revalidation before every spawn.
+    contains:
+      - interaction.poll-cycle
+      - interaction.dispatch-issue
+      - invariant.priority-order
+      - invariant.single-claim
+      - invariant.concurrency-caps
+      - invariant.dispatch-revalidation
+      - failure.tracker-unreachable
+      - failure.spawn-failure
+
+  - id: chapter.claim-lifecycle
+    name: Claim Lifecycle, Retry, and Blocking
+    overview: >
+      What happens to an issue after it is claimed: the lifecycle of a claim,
+      reconciliation that lets tracker state override local state, backed-off
+      retries that never duplicate, stall recovery, and the blocked handling
+      that holds issues waiting on a human.
+    contains:
+      - lifecycle
+      - interaction.reconcile-claims
+      - interaction.retry-issue
+      - interaction.stall-detection
+      - interaction.block-issue
+      - invariant.tracker-authority
+      - invariant.bounded-backoff
+      - invariant.blocked-not-retried
+      - failure.agent-abnormal-exit
+      - failure.agent-stalled
+      - failure.input-required
+
+  - id: chapter.agent-execution
+    name: Agent Session Execution
+    overview: >
+      One agent run from the inside: the session protocol, the prompt built
+      from the operator's template, the bounded turn loop that re-checks the
+      tracker between turns, mid-turn approval and input handling, and the
+      secrecy line between orchestrator credentials and agent commands.
+    contains:
+      - interaction.agent-run
+      - interaction.handle-approvals
+      - interface.agent-session-protocol
+      - invariant.turn-bound
+      - invariant.secret-isolation
+      - failure.turn-timeout
+
+  - id: chapter.tracker-boundary
+    name: Tracker Adapter Boundary
+    overview: >
+      The contract every issue provider implements: normalized read
+      operations the scheduler relies on, and the optional provider-native
+      agent tools whose bindings are frozen per session.
+    contains:
+      - interface.tracker-adapter
+      - interaction.execute-agent-tool
+      - invariant.tool-binding-stability
+      - failure.tool-call-failed
+
+  - id: chapter.workspace
+    name: Workspace Provisioning and Safety
+    overview: >
+      The per-issue directory every run executes in: deterministic identity,
+      containment under the operator's root, lifecycle hooks for bootstrap
+      and salvage, reuse across attempts, and removal when the tracker says
+      the work is done.
+    contains:
+      - interaction.create-workspace
+      - interaction.cleanup-workspace
+      - interface.workspace-hooks
+      - invariant.workspace-containment
+      - invariant.workspace-determinism
+      - failure.workspace-bootstrap-failed
+      - failure.workspace-unsafe-path
+      - failure.hook-nonblocking
+
+  - id: chapter.remote-execution
+    name: Remote Execution
+    conformance: extension
+    overview: >
+      Running workspaces and agent sessions on remote worker hosts: host
+      selection with per-host caps, one-host-per-run affinity, and remote
+      failure handling that surfaces to the normal retry path.
+    contains:
+      - interaction.remote-agent-run
+      - invariant.host-affinity
+      - failure.remote-command-failed
+
+  - id: chapter.observability
+    name: Observability
+    conformance: extension
+    overview: >
+      The operator's window: session telemetry folded into claim status,
+      terminal and browser dashboards, a JSON status API, manual refresh,
+      and accounting that stays truthful under noisy runtime reports.
+    contains:
+      - interaction.observe-status
+      - interface.observability-api
+      - invariant.token-accounting
+      - failure.snapshot-unavailable

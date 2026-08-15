@@ -1,0 +1,306 @@
+failures:
+  - id: failure.config-invalid-at-startup
+    name: Invalid Configuration at Startup
+    occurs_during:
+      - interaction.load-config
+    meaning: >
+      The workflow document is missing, unparsable, structurally invalid, or
+      fails the tracker adapter's semantic validation when the service starts.
+    retryable: "no (requires operator correction)"
+    required_behavior:
+      - Refuse to start; no partial runtime comes up.
+      - Report the failure class and detail to the operator.
+    recovery: >
+      The operator fixes the document and starts the service again.
+    evidence:
+      - evidence.workflow-store
+      - evidence.test-startup-preflight
+    verification:
+      - For each failure class (missing file, parse error, invalid field, missing tracker kind) verify refusal with a distinguishable reason.
+
+  - id: failure.config-reload-invalid
+    name: Invalid Configuration on Reload
+    occurs_during:
+      - interaction.reload-config
+    meaning: >
+      A running service detects a document change whose content fails any
+      stage of the load and validation pipeline.
+    retryable: "yes (next detected change retries automatically)"
+    required_behavior:
+      - Keep serving the last known good configuration unchanged.
+      - Log the reload failure with its reason.
+      - Leave running agents and claims untouched.
+    recovery: >
+      A subsequent valid edit is picked up and applied normally.
+    evidence:
+      - evidence.workflow-store
+      - evidence.test-last-good
+    verification:
+      - Break the document mid-run and verify settings reads, agents, and claims are unaffected.
+      - Fix the document and verify the new settings apply without restart.
+
+  - id: failure.tracker-unreachable
+    name: Tracker Fetch Failure
+    occurs_during:
+      - interaction.poll-cycle
+      - interaction.reconcile-claims
+      - interaction.retry-issue
+    meaning: >
+      A tracker read (listing active issues, reconciling claim ids, or
+      refetching for retry) fails or returns an error.
+    retryable: "yes (next cycle or next backoff step)"
+    required_behavior:
+      - Treat the failure as absence of information, never as issue absence.
+      - Keep running agents and held claims unchanged.
+      - Log the failure and proceed to the next scheduled attempt.
+      - Reschedule an affected retry with an increased delay.
+    recovery: >
+      Normal operation resumes on the first successful fetch; reconciliation
+      then applies whatever changed in the meantime.
+    evidence:
+      - evidence.orchestrator-reconcile
+      - evidence.orchestrator-retry
+    verification:
+      - Fail listing during a poll cycle and verify no claim changes and the next cycle is scheduled.
+      - Fail the reconciliation fetch and verify agents keep running.
+      - Fail a retry refetch and verify the retry reschedules with a larger delay.
+
+  - id: failure.spawn-failure
+    name: Agent Spawn Failure
+    occurs_during:
+      - interaction.dispatch-issue
+    meaning: >
+      The supervised agent run cannot be started for an admitted issue.
+    retryable: "yes"
+    required_behavior:
+      - Do not lose the issue; schedule a backed-off retry carrying the error.
+      - Record the failure reason on the retry entry for the operator.
+    recovery: >
+      The retry path re-validates and re-dispatches when the cause clears.
+    evidence:
+      - evidence.orchestrator-dispatch-guards
+    verification:
+      - Force spawn failure and verify a retry entry exists with the error and an increased attempt.
+
+  - id: failure.agent-abnormal-exit
+    name: Agent Run Abnormal Exit
+    occurs_during:
+      - interaction.agent-run
+    meaning: >
+      An agent run terminates with an error: session startup failed, a turn
+      failed or was cancelled, the process crashed, or the run raised.
+    retryable: "yes"
+    required_behavior:
+      - Keep the claim and schedule a backed-off retry preserving attempt count and execution target.
+      - Keep the workspace so the retry resumes prior work.
+      - Record the exit reason for observability.
+      - Route the exit to blocked handling instead when the last session signal was input-required.
+    recovery: >
+      The retry re-validates the issue and starts a fresh run in the same
+      workspace.
+    evidence:
+      - evidence.orchestrator-block
+      - evidence.test-retry-backoff
+    verification:
+      - Crash a run and verify claim retention, workspace retention, and a backed-off retry.
+      - Crash a run after an input-required event and verify blocking instead of retry.
+
+  - id: failure.turn-timeout
+    name: Turn Inactivity Timeout
+    occurs_during:
+      - interaction.agent-run
+    meaning: >
+      A running turn produces no stream activity for the configured turn
+      timeout; the turn is abandoned as failed.
+    retryable: "yes (as an abnormal run exit)"
+    required_behavior:
+      - Reset the timeout on every received stream event, so only true silence fires it.
+      - End the run with a timeout error that enters the normal retry path.
+    recovery: >
+      The scheduler retries the issue with backoff.
+    evidence:
+      - evidence.app-server-protocol
+      - evidence.test-turn-timeout
+    verification:
+      - Stream periodic events longer than the timeout and verify no firing.
+      - Go silent past the timeout and verify the turn fails with a timeout error.
+
+  - id: failure.input-required
+    name: Operator Input Required
+    occurs_during:
+      - interaction.agent-run
+      - interaction.handle-approvals
+      - interaction.block-issue
+    meaning: >
+      The agent runtime asks for something only a human can provide - an
+      approval under a non-auto-approving policy, freeform input, or an
+      elicitation - and the turn cannot proceed.
+    retryable: "no (automatic retry is prohibited; human action releases it)"
+    required_behavior:
+      - End the turn promptly with a classified input-required or approval-required outcome.
+      - Move the claim to blocked, carrying the human-readable reason.
+      - Hold the block until the tracker state changes.
+    recovery: >
+      A human answers via the tracker or agent-side channel and moves the
+      issue's tracker state; reconciliation releases the block and normal
+      dispatch resumes.
+    evidence:
+      - evidence.app-server-approvals
+      - evidence.test-blocking
+      - evidence.test-approvals
+    verification:
+      - Trigger each blocker class (approval, freeform input, elicitation) and verify a blocked claim with a reason.
+      - Verify no automatic retry occurs while blocked.
+
+  - id: failure.agent-stalled
+    name: Agent Run Stalled
+    occurs_during:
+      - interaction.stall-detection
+    meaning: >
+      A running agent produced no observable session activity for longer
+      than the configured stall timeout.
+    retryable: "yes, unless the last signal was input-required"
+    required_behavior:
+      - Stop the stalled session.
+      - Schedule a backed-off retry preserving the claim and workspace.
+      - Block instead of retrying when the last signal indicated required input.
+    recovery: >
+      The retried run resumes from the intact workspace.
+    evidence:
+      - evidence.orchestrator-stall
+      - evidence.test-blocking
+    verification:
+      - Stall a run and verify stop plus backed-off retry with the workspace intact.
+      - Stall a run on an elicitation and verify blocking.
+
+  - id: failure.workspace-bootstrap-failed
+    name: Workspace Bootstrap Failure
+    occurs_during:
+      - interaction.create-workspace
+    meaning: >
+      The after_create bootstrap hook fails or exceeds the hook timeout while
+      initializing a newly created workspace.
+    retryable: "yes"
+    required_behavior:
+      - Remove the newly created partial workspace before failing.
+      - Fail the provisioning so the run fails into the retry path.
+      - Never delete a pre-existing (reused) workspace on bootstrap failure.
+    recovery: >
+      The next attempt creates the directory fresh and bootstraps again.
+    evidence:
+      - evidence.workspace-create
+      - evidence.test-hooks
+    verification:
+      - Fail the bootstrap hook and verify no directory remains and the run fails.
+      - Time the hook out and verify identical handling.
+      - Verify the following attempt runs the bootstrap hook again.
+
+  - id: failure.workspace-unsafe-path
+    name: Unsafe Workspace Path
+    occurs_during:
+      - interaction.create-workspace
+      - interaction.cleanup-workspace
+    meaning: >
+      A workspace path fails containment validation: it equals the root,
+      escapes it through symlinks, resolves outside it, or cannot be
+      canonicalized.
+    retryable: "no (indicates hostile or broken filesystem state)"
+    required_behavior:
+      - Refuse the create or remove operation entirely.
+      - Report a reason that distinguishes the containment violation class.
+      - Leave the filesystem untouched by the refused operation.
+    recovery: >
+      An operator inspects and repairs the workspace root; the issue retries
+      through normal scheduling afterward.
+    evidence:
+      - evidence.workspace-validate
+      - evidence.test-workspace-safety
+    verification:
+      - Exercise each violation class and verify refusal with a distinct error and no filesystem change.
+
+  - id: failure.hook-nonblocking
+    name: Non-Blocking Hook Failure
+    occurs_during:
+      - interaction.cleanup-workspace
+      - interaction.agent-run
+    meaning: >
+      A teardown-side hook (after_run or before_remove) fails or times out.
+      These hooks are best-effort; their failure must not change control
+      flow.
+    retryable: "not applicable (outcome is ignored)"
+    required_behavior:
+      - Log the hook failure with its output.
+      - Proceed with the surrounding operation (run completion or workspace removal) unchanged.
+    recovery: >
+      None required; the operator reads the log if the hook mattered.
+    evidence:
+      - evidence.workspace-hooks
+      - evidence.test-hooks
+    verification:
+      - Fail and time out before_remove and verify removal still completes.
+      - Fail after_run and verify the run's outcome is unchanged.
+
+  - id: failure.tool-call-failed
+    name: Provider Tool Call Failure
+    conformance: extension
+    occurs_during:
+      - interaction.execute-agent-tool
+    meaning: >
+      A provider-native tool call fails: unknown tool, invalid arguments,
+      provider error response, or transport failure.
+    retryable: "at the agent's discretion (the turn continues)"
+    required_behavior:
+      - Reply a structured failure payload to the session; never leave the call unanswered.
+      - Name the supported tools when the tool is unknown.
+      - Preserve provider error bodies in the failure payload.
+    recovery: >
+      The agent reads the failure and adapts within the same turn.
+    evidence:
+      - evidence.test-tool-binding
+      - evidence.tracker-boundary
+    verification:
+      - Trigger each failure class and verify a structured failure reply with the turn continuing.
+
+  - id: failure.remote-command-failed
+    name: Remote Execution Failure
+    conformance: extension
+    occurs_during:
+      - interaction.remote-agent-run
+    meaning: >
+      A remote operation - workspace preparation, hook execution, or session
+      launch - fails or times out on the selected worker host.
+    retryable: "yes, via the scheduler's retry path"
+    required_behavior:
+      - Surface the failure to the run instead of silently switching hosts.
+      - Enter the normal retry path preserving the host preference.
+      - Bound every remote command with a timeout.
+    recovery: >
+      The retry re-selects a host through the scheduler; a healthy preferred
+      host is reused, a dead one loses the tie to others.
+    evidence:
+      - evidence.test-remote
+      - evidence.ssh
+    verification:
+      - Fail a remote launch and verify the run fails with the reason, without a host hop.
+      - Verify remote commands cannot hang past their timeout.
+
+  - id: failure.snapshot-unavailable
+    name: Status Snapshot Unavailable
+    conformance: extension
+    occurs_during:
+      - interaction.observe-status
+    meaning: >
+      The scheduler cannot produce a status snapshot in time, or is not
+      running, when an observability surface asks for one.
+    retryable: "yes (the next render or request tries again)"
+    required_behavior:
+      - Report timeout or unavailability explicitly to the viewer.
+      - Keep the observability surface itself alive.
+      - Never block or crash the scheduler on behalf of a viewer.
+    recovery: >
+      Snapshots resume when the scheduler catches up; no state is lost.
+    evidence:
+      - evidence.test-observability
+    verification:
+      - Make the scheduler unresponsive and verify an explicit timeout result and a live surface.
+      - Stop the scheduler and verify an explicit unavailable result.
