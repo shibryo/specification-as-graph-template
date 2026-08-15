@@ -55,6 +55,11 @@ meets the thing it justifies:
 | One chapter | that chapter's `overview:` in `spec/chapters.yaml` |
 | One record | `intent:` on the invariant, or a sentence in the record's own prose |
 
+A record-level reason renders subordinate to the statement it explains, so a
+reader can tell at a glance which sentence they are held to. Never put a
+requirement there: anything an implementation must satisfy belongs in the
+statement, where it is not typeset as an aside.
+
 A list of design intents held apart from the records fails twice. It has to be
 collected into a section nobody asked for, because a record that references
 nothing and is referenced by nothing has no other placement. And it pre-announces

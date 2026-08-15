@@ -724,7 +724,7 @@ Validation checks:
 
 At most one Claim exists for a Work Item at any time, and a claimed item has at most one active Agent Run.
 
-Two agents on one item duplicate effort and contend for the same branch.
+*Two agents on one item duplicate effort and contend for the same branch.*
 
 This prevents:
 
@@ -742,7 +742,7 @@ Validation checks:
 
 Candidates are dispatched in a total order derived from priority, then age, then identifier, so equal capacity always yields the same selection.
 
-Operators must be able to predict which work an agent picks up next.
+*Operators must be able to predict which work an agent picks up next.*
 
 This prevents:
 
@@ -760,7 +760,7 @@ Validation checks:
 
 The number of active Agent Runs never exceeds the configured limit overall, the configured limit for the item's board state, or the configured limit per execution location.
 
-Capacity limits exist because agents consume real machines, quota, and money.
+*Capacity limits exist because agents consume real machines, quota, and money.*
 
 This prevents:
 
@@ -779,7 +779,7 @@ Validation checks:
 
 A Work Item is re-read from the Work Source immediately before an Agent Run starts, and the run does not start if it no longer qualifies.
 
-Board state changes between the poll and the dispatch, and an agent run is expensive to start and to undo.
+*Board state changes between the poll and the dispatch, and an agent run is expensive to start and to undo.*
 
 This prevents:
 
@@ -928,7 +928,7 @@ Validation checks:
 
 Every path the subject creates, runs an agent in, or deletes resolves, after links are followed, to a location strictly inside the configured workspace root.
 
-An autonomous agent with a writable path outside its workspace can damage the operator's own source tree, and a delete outside the root is unrecoverable.
+*An autonomous agent with a writable path outside its workspace can damage the operator's own source tree, and a delete outside the root is unrecoverable.*
 
 This prevents:
 
@@ -948,7 +948,7 @@ Validation checks:
 
 One Work Item identifier always maps to the same workspace identity, and two different identifiers never map to the same one.
 
-A run must find the work its predecessor left behind, and unrelated items must never share a checkout.
+*A run must find the work its predecessor left behind, and unrelated items must never share a checkout.*
 
 This prevents:
 
@@ -1204,7 +1204,7 @@ Validation checks:
 
 Every environment variable the configuration declares as credential-bearing for the Work Source is absent from the agent process.
 
-The subject's credential is the operator's authority over the board. An agent holding it can act outside the orchestrator's policy and outside its audit.
+*The subject's credential is the operator's authority over the board. An agent holding it can act outside the orchestrator's policy and outside its audit.*
 
 This prevents:
 
@@ -1222,7 +1222,7 @@ Validation checks:
 
 A single Agent Run starts no more than the configured number of Turns, even while its Work Item stays active.
 
-An unbounded turn loop lets one run hold capacity forever and hides the fact that the agent is not converging.
+*An unbounded turn loop lets one run hold capacity forever and hides the fact that the agent is not converging.*
 
 This prevents:
 
@@ -1553,7 +1553,7 @@ Validation checks:
 
 A Claim is released as soon as its Work Item reaches a terminal state, leaves the active states, stops being routed to this deployment, or stops being visible.
 
-Board state is authoritative. A claim that outlives eligibility is capacity spent on work nobody wants.
+*Board state is authoritative. A claim that outlives eligibility is capacity spent on work nobody wants.*
 
 This prevents:
 
@@ -1572,7 +1572,7 @@ Validation checks:
 
 Consecutive failures for one Claim produce non-decreasing delays that never exceed the configured ceiling, and at most one retry is pending per item.
 
-Immediate retries turn a failing dependency into a denial of service, and an uncapped curve turns a transient failure into an outage.
+*Immediate retries turn a failing dependency into a denial of service, and an uncapped curve turns a transient failure into an outage.*
 
 This prevents:
 
@@ -1591,7 +1591,7 @@ Validation checks:
 
 A Work Item whose agent is awaiting an operator decision holds its Claim, has no active run, and has no pending retry until it stops qualifying.
 
-Retrying work that cannot proceed without a human wastes capacity and hides the pending decision from the operator.
+*Retrying work that cannot proceed without a human wastes capacity and hides the pending decision from the operator.*
 
 This prevents:
 
@@ -1792,7 +1792,7 @@ Validation checks:
 
 The effective configuration is always a version that passed validation. An invalid version neither starts the subject nor replaces a running one.
 
-Configuration is edited while agents are mid-run. A typo must not take down a working deployment or silently change scheduling policy.
+*Configuration is edited while agents are mid-run. A typo must not take down a working deployment or silently change scheduling policy.*
 
 This prevents:
 
@@ -1959,7 +1959,7 @@ Validation checks:
 
 Cumulative usage reported for an Agent Run is non-decreasing, and an incremental report is never added on top of a cumulative one for the same usage.
 
-Usage is the operator's only measure of what a run costs. A total that drops or double counts makes cost impossible to reason about.
+*Usage is the operator's only measure of what a run costs. A total that drops or double counts makes cost impossible to reason about.*
 
 This prevents:
 
@@ -2031,7 +2031,7 @@ Validation checks:
 
 One Agent Run prepares its workspace and runs its session on a single execution location, and a failure never moves the same run to another location.
 
-Work in progress lives in the workspace. Moving a run to another host abandons that work and hides the failure of the original host.
+*Work in progress lives in the workspace. Moving a run to another host abandons that work and hides the failure of the original host.*
 
 This prevents:
 

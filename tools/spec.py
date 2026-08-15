@@ -391,7 +391,7 @@ def checklist_lines(d, params, sec_no=None):
 
 def invariant_lines(x, h):
     L = [f"{h} {x.get('name',x['id'])}",'',sent(x.get('statement')),'']
-    if x.get('intent'): L+=[sent(x['intent']),'']
+    if x.get('intent'): L+=[f"*{sent(x['intent'])}*",'']
     if x.get('prevents'): L+=[lab(x,'prevents','This prevents:'),'']+bullets(x['prevents'])+['']
     if x.get('verification'): L+=[lab(x,'verification','Validation checks:'),'']+bullets(x['verification'])+['']
     return L

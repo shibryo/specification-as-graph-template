@@ -223,7 +223,7 @@ Reload: Operator changes take effect on subsequent decisions without restarting 
 
 For a given logical Request, the authoritative externally observable outcome does not simultaneously represent mutually exclusive terminal states.
 
-Consumers should not need to infer which incompatible outcome is authoritative.
+*Consumers should not need to infer which incompatible outcome is authoritative.*
 
 This prevents:
 
