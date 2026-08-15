@@ -19,6 +19,7 @@ entrypoints:
   - intent.yaml
   - model.yaml
   - responsibilities.yaml
+  - parameters.yaml
   - interactions.yaml
   - lifecycle.yaml
   - interfaces.yaml

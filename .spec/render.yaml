@@ -17,7 +17,15 @@ render:
       invariants, and failures in the declared reading order.
     fallback: Type-ordered sections are used when no chapters are declared.
     unassigned: Records assigned to no chapter render in a final appendix.
+  extensions:
+    marker: "conformance: extension"
+    strategy: >
+      Chapters and records marked as extensions render with an explicit
+      optional-extension note. Conformance states that extensions may be
+      omitted entirely and that an implemented extension is normative in full.
   sections:
+    - title: Normative Language
+      strategy: project_normative_language
     - title: Problem Statement
       strategy: intent_context
     - title: Goals and Non-Goals
@@ -26,6 +34,8 @@ render:
       strategy: explain_intent
     - title: System Model
       strategy: assemble_model_and_ownership
+    - title: Configuration Specification
+      strategy: explain_parameters
     - title: Core Interactions
       strategy: narrative_interactions
     - title: Lifecycle and State
@@ -37,8 +47,29 @@ render:
     - title: Failure and Recovery Semantics
       strategy: explain_failure_model
     - title: Implementation-Defined Areas
-      strategy: explain_freedom
+      strategy: explain_freedom_and_documentation_obligations
     - title: Reference Implementation
       strategy: explain_reference
+    - title: Test and Validation Matrix
+      strategy: assemble_verification_clauses_by_chapter
+    - title: Implementation Checklist (Definition of Done)
+      strategy: assemble_definition_of_done
     - title: Conformance
       strategy: explain_conformance
+  generated_redundancy:
+    note: >
+      The config cheat sheet, test and validation matrix, and implementation
+      checklist are deliberately redundant with the body, in the style of
+      implementation-facing specifications. Because they are projections of
+      the same records, they cannot drift from the body.
+  vocabulary:
+    note: >
+      Rendered labels reuse the lexicon of hand-written implementation-facing
+      specifications (Fields, Failure semantics, Implications, Validation
+      checks, Cheat Sheet, Definition of Done). Do not invent editorial labels
+      absent from that genre, such as "Why it matters".
+  informative_aids:
+    note: >
+      Concept field lists render typed per-field facts; interface/parameter
+      examples render as fenced code blocks; interaction reference algorithms
+      render as fenced pseudocode labeled non-normative.

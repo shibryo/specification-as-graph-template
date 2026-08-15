@@ -27,3 +27,5 @@ interactions:
     requirements:
       - level: must_not
         statement: Complete with an ambiguous externally observable outcome.
+    verification:
+      - Submit a valid Request and verify exactly one unambiguous outcome (a Result or a defined failure) becomes observable.

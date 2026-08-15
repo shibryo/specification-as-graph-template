@@ -3,8 +3,11 @@ concepts:
     name: Request
     meaning: >
       A unit of intent submitted to the subject for processing.
-    properties:
-      - Has stable identity for the duration required by the specification.
+    attributes:
+      - name: id
+        type: string
+        required: true
+        meaning: Stable identity for the duration required by the specification.
 
   - id: concept.result
     name: Result

@@ -4,13 +4,17 @@ process:
     inputs:
       - source code
       - tests
-      - configuration
+      - configuration and operator-tunable settings
       - documentation
       - interfaces and schemas
       - observed behavior
       - decision records
     outputs:
-      - observations
+      - evidence register (spec/evidence.yaml), each entry with kind, source, and note
+      - reference anchor (reference.yaml) pinning citations to a specific revision
+    rules:
+      - Record evidence as it is used, not retrospectively. The register is what the recovery actually consulted.
+      - Every entry states its kind (code, test, doc, behavior, statement) so later basis claims can be checked against it.
 
   - id: reconstruct
     purpose: Reconstruct the whole subject behind the evidence.
@@ -22,6 +26,8 @@ process:
       - interfaces
       - invariants
       - failures and recovery
+      - operator contract (which tunable parameters exist and what each governs)
+      - optional capability boundaries (which capabilities are extensions rather than core)
 
   - id: infer-intent
     purpose: Infer why observed behavior exists without promoting guesses to facts.
@@ -37,6 +43,17 @@ process:
       - reference-specific
       - informative
       - unresolved
+      - extension
+    provenance:
+      stance: recovered | owned (declared in the manifest)
+      basis: observed | stated | derived (recorded on invariants, checked against cited evidence)
+      evidence: records cite evidence-register entries via `evidence:` lists
+    rules:
+      - A detail a competent implementer would necessarily reconstruct from the rest of the specification may be omitted; a fact they could not discover (that a parameter exists, that a capability is optional, that a choice must be documented) must not be.
+      - A capability cluster the subject can operate without is an extension, not a core requirement; do not promote it to core and do not drop it.
+      - An implementation-defined choice that affects observable behavior carries a documentation obligation rather than silent freedom.
+      - A mechanism whose only evidence is observed reference behavior is presumed implementation-defined. Promote it to normative only with a stated basis or a recorded semantic-necessity argument.
+      - In a recovered specification, constants and mechanism shapes default to implementation-defined. In an owned specification, the owners may fix the values they chose as contract.
 
   - id: normalize
     purpose: Encode the recovered subject as connected specification records.
@@ -45,6 +62,14 @@ process:
       - Interactions must connect participants, sequence, invariants, and failures where applicable.
       - Lifecycle records must express semantic state rather than incidental execution state.
       - Behavior records must be grouped into subject-domain chapters when the subject spans more than one domain.
+      - Operator-tunable behavior that changes normative semantics must be recorded as a parameter constraining the records it governs; concrete defaults stay implementation-defined unless the value itself is contractual. Each parameter carries a stable reference key.
+      - Concepts at data boundaries should carry typed field lists (attributes) so per-field facts — requiredness, ordering direction, comparison rules — are not lost in prose.
+      - Extension records and chapters must be marked `conformance: extension`.
+      - Interactions and invariants must carry falsifiable verification clauses; the renderer assembles them into the verification matrix.
+      - Implementation-defined areas should list what a conforming implementation must document about its selected mechanism.
+      - Examples on interfaces/parameters and reference algorithms on interactions are informative aids; they must not carry semantics absent from their record.
+      - Redundant summaries (cheat sheet, checklist) are generated projections, never hand-written record content.
+      - Prose is plain. Short declarative sentences, one fact per bullet, no comma-joined independent clauses. Split compound statements instead of merging them.
 
   - id: validate
     purpose: Detect structural gaps, lost intent, and accidental freezing of the current implementation.
@@ -58,6 +83,11 @@ process:
       - failures are connected to interactions
       - lifecycle states are reachable from the declared initial state
       - chapter references resolve and every behavior record belongs to exactly one chapter when chapters are declared
+      - parameters name what they control and constrain resolvable records
+      - conformance markers use a known level
+      - interactions and invariants carry verification clauses
+      - evidence references resolve and invariant basis claims are consistent with cited evidence kinds
+      - recovered specifications cite evidence for every invariant
       - under-specification review
       - over-specification review
       - reference implementation separation
@@ -67,18 +97,28 @@ process:
     required_views:
       - system model overview
       - responsibility and ownership view
+      - operator contract
       - subject-domain chapters
       - interaction narratives
       - lifecycle narrative
       - failure model
+      - verification matrix
 
   - id: render
     purpose: Generate SPEC.md as a coherent narrative projection rather than a record dump.
+    reader_models:
+      - transcriber: implements line by line from the scan path (operator contract, cheat sheet, field lists, verification matrix, checklist, examples, algorithms)
+      - reconstructor: re-derives the design from the understanding path (intent, system model, chapters, invariants, failures)
     rules:
       - Resolve internal identifiers to semantic names in prose.
       - Preserve normative language exactly in meaning.
       - Explain relationships between records instead of merely listing them.
+      - Serve both reader models; every normative fact must be reachable through the scan path and the understanding path.
+      - Open with a reading guide that routes each reader model to its path.
+      - State the specification's provenance stance so readers know whether fixed mechanisms are deliberate contract or recovered observation.
       - Project subject-domain chapters in declared order and place unassigned records in an appendix.
+      - Mark extension chapters and records so a reader can identify the omissible surface.
+      - Assemble every verification clause into a single verification matrix grouped by chapter.
       - Do not add normative semantics that are absent from the source graph.
     output:
       - SPEC.md
