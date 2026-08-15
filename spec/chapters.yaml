@@ -1,13 +1,19 @@
-# Optional subject-domain chapter layer.
+# Optional chapter layer.
 #
 # Chapters group behavior records (interactions, interfaces, invariants,
 # failures, and optionally the literal token `lifecycle`) into the order a
-# reader should encounter them. Concepts and responsibilities stay in the
-# global System Model section. When this file is absent or empty, the
-# renderer falls back to type-ordered sections.
+# reader should encounter them. Cut them by component, not by execution phase.
+# Concepts and responsibilities stay in the global System Model section. When
+# this file is absent or empty, the renderer falls back to type-ordered
+# sections.
+#
+# `layer:` names the layer from model.yaml that this chapter expands. Chapters
+# must appear in the order their layers are declared, and extension chapters
+# sort last; validation checks both. See the chapter order rule in AGENTS.md.
 chapters:
   - id: chapter.request-processing
     name: Request Processing
+    layer: layer.core
     overview: >
       How a Request becomes a Result: the end-to-end flow, the interface it is
       submitted through, the guarantees the flow must uphold, its lifecycle,

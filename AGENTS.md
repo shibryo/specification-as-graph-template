@@ -21,7 +21,7 @@ Do not document the implementation. Recover and specify the subject behind the i
 9. Separate essential semantics from implementation-specific or reference-specific choices.
 10. Attach normative statements to the model element they constrain.
 11. Do not create an unstructured requirements list as the primary specification model.
-12. Group behavior records into subject-domain chapters (`spec/chapters.yaml`) when the subject spans more than one domain.
+12. Declare the subject's decomposition once as `layers:` in `spec/model.yaml`, in reading order, and group behavior records into chapters (`spec/chapters.yaml`) that expand those layers in that order. See the chapter order rule.
 13. Recover the operator contract: every runtime-tunable setting that changes normative behavior becomes a parameter (`spec/parameters.yaml`) constraining the records it governs. The parameter's existence and semantics are normative; its name, format, and default stay implementation-defined unless the value itself is contractual. Give each parameter a `key` — a stable reference key used by the rendered document's configuration field list.
 14. Give concepts at data boundaries a typed field list (`attributes`: name, type, requiredness, meaning). Field lists exist to carry per-field facts that prose property lists lose — requiredness, ordering direction, comparison rules — not storage layout.
 15. Mark optional capability clusters as extensions (`conformance: extension` on chapters or records). Do not promote an extension to a core requirement, and do not drop it because it is optional.
@@ -97,9 +97,24 @@ The renderer MUST NOT degrade into concatenating records in storage order. It mu
 - implementation checklist and configuration field list (generated redundancy);
 - conformance expectations, including the omissible extension surface.
 
-Chapter structure is part of narrative integrity. When the subject spans more than one domain, the graph MUST declare subject-domain chapters (`spec/chapters.yaml`) that group interactions, interfaces, invariants, and failures — and, where it belongs to one domain, the lifecycle — by theme, in reading order. The renderer projects chapters in declared order; records assigned to no chapter fall to an appendix and are reported by validation. Type-ordered projection is acceptable only for single-topic subjects.
+Chapter structure is part of narrative integrity. When the subject spans more than one component, the graph MUST declare chapters (`spec/chapters.yaml`) that group interactions, interfaces, invariants, and failures — and, where it belongs to one component, the lifecycle — in reading order. The renderer projects chapters in declared order; records assigned to no chapter fall to an appendix and are reported by validation. Type-ordered projection is acceptable only for single-component subjects.
 
 Identifiers used by `spec/` are internal graph identity. The rendered specification SHOULD prefer semantic names and prose unless an identifier itself is necessary for external traceability.
+
+## Chapter order rule
+
+Cut chapters by component, not by execution phase. Someone implementing one component should find it in one place, rather than assembled from a phase in one chapter and a boundary in another.
+
+Then order the chapters so the document can be read straight through.
+
+- **Declare the decomposition once.** `layers:` in `spec/model.yaml` states how the subject comes apart, in reading order, and renders as System Overview / Abstraction Levels. The body expands that list in that order. One layer may become more than one chapter — the state a component owns and the behavior that moves it are a common split — but each chapter belongs to one layer.
+- **Explain nothing before what it rests on.** A chapter must be readable from the chapters before it. When a chapter uses a state name, an interface, or an invariant that another chapter defines, the defining chapter comes first.
+- **Hoist shared vocabulary instead of reordering.** A noun two components both need belongs to the Core Domain Model, not to whichever chapter would otherwise have to come first.
+- **Place assembly after its inputs.** A chapter that only combines what other chapters produce goes after the last chapter it takes an input from.
+- **Sort extensions last.** Chapters marked `conformance: extension` follow every core chapter, whatever ordered the rest.
+- **Record a coin-flip.** When the dependency test leaves two orders equally defensible, choose one and say why in a line. An order whose principle is stated can be argued with; an unstated one cannot.
+
+Do not order chapters by distance from the user, by how the subject executes at runtime, or by what an implementer would build first. The first is not a property most subjects have. The second belongs to reference algorithms, the third to the test and validation matrix — both are already projected elsewhere in the document, and neither may reshuffle the body.
 
 ## Abstraction rule
 
