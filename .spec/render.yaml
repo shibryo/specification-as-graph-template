@@ -23,6 +23,13 @@ render:
       Chapters and records marked as extensions render with an explicit
       optional-extension note. Conformance states that extensions may be
       omitted entirely and that an implemented extension is normative in full.
+  numbering: >
+    Sections are numbered continuously in the style of hand-written
+    implementation-facing specifications. The front-half cuts (Problem
+    Statement; Goals and Non-Goals; System Overview with Main Components and
+    External Dependencies; Core Domain Model with Entities and Relationships)
+    are fixed so every specification generated from this template presents
+    the same analytical structure to the reader.
   sections:
     - title: Normative Language
       strategy: project_normative_language
@@ -30,10 +37,12 @@ render:
       strategy: intent_context
     - title: Goals and Non-Goals
       strategy: goals
+    - title: System Overview
+      strategy: assemble_overview_components_and_dependencies
+    - title: Core Domain Model
+      strategy: assemble_entities_and_relationships
     - title: Design Intent
       strategy: explain_intent
-    - title: System Model
-      strategy: assemble_model_and_ownership
     - title: Configuration Specification
       strategy: explain_parameters
     - title: Core Interactions
@@ -58,7 +67,7 @@ render:
       strategy: explain_conformance
   generated_redundancy:
     note: >
-      The config cheat sheet, test and validation matrix, and implementation
+      The configuration field list, test and validation matrix, and implementation
       checklist are deliberately redundant with the body, in the style of
       implementation-facing specifications. Because they are projections of
       the same records, they cannot drift from the body.
@@ -66,7 +75,7 @@ render:
     note: >
       Rendered labels reuse the lexicon of hand-written implementation-facing
       specifications (Fields, Failure semantics, Implications, Validation
-      checks, Cheat Sheet, Definition of Done). Do not invent editorial labels
+      checks, Definition of Done). Do not invent editorial labels
       absent from that genre, such as "Why it matters".
   informative_aids:
     note: >

@@ -27,7 +27,7 @@ This specification serves two implementation styles.
 
 To implement by transcription, use the scan path:
 
-- The Configuration Specification and its cheat sheet name every required field.
+- The Configuration Specification lists every operator-settable field.
 - Concept field lists give the data contract.
 - The Test and Validation Matrix lists the checks an implementation must pass.
 - The Implementation Checklist is the definition of done.
@@ -36,25 +36,25 @@ To implement by transcription, use the scan path:
 To implement by reconstruction, read in order:
 
 - The Problem Statement and Design Intent say why the subject exists.
-- The System Model defines the concepts and who owns each decision.
+- The System Overview and Core Domain Model define the participants and who owns each decision.
 - The chapters walk through behavior end to end.
 - Invariants and failures state what must survive your design choices.
 
 Both paths are projections of the same records. They cannot disagree.
 
-## Problem Statement
+## 1. Problem Statement
 
 Teams track software work in an issue tracker (Linear, GitHub, GitLab, Jira, Asana, or similar). Autonomous coding agents can execute much of that work, but an agent session is a fragile, finite process: it can crash, stall, run out of turns, or hit a question only a human can answer. Someone has to watch the tracker, hand each eligible item to an agent in a safe workspace, keep the agent honest about the item's current tracker state, and clean up when the item is finished. Doing this by hand does not scale past a handful of items, and doing it naively risks duplicate agents on one item, agents working on closed items, or agents escaping their workspace.
 
 Continuously convert active tracker work items into supervised coding-agent runs, in parallel and unattended, while the tracker remains the single source of truth for what is in scope, without ever running two agents on the same item, without letting an agent touch anything outside its assigned workspace, and while surfacing progress and blockage to a human operator.
 
-### Why This Specification Exists
+### 1.1 Why This Specification Exists
 
 The subject's essential guarantees - single ownership of an item, tracker supremacy over local state, revalidation before every dispatch, workspace containment, blocked-versus-retry classification, and last-known-good configuration - are scattered across one implementation's process tree. Without a specification, a reimplementation would likely reproduce the easy parts (poll, spawn) and silently lose the safety and reconciliation semantics that make unattended operation acceptable.
 
-## Goals and Non-Goals
+## 2. Goals and Non-Goals
 
-### Goals
+### 2.1 Goals
 
 - Keep the issue tracker authoritative; local scheduling state always yields to fresh tracker state.
 - Run at most one agent per work item at any time, across restarts and retries.
@@ -64,170 +64,28 @@ The subject's essential guarantees - single ownership of an item, tracker suprem
 - Let operators tune scheduling, safety, and agent behavior at runtime through one configuration artifact.
 - Make orchestrator and agent activity observable to a human operator.
 
-### Non-Goals
+### 2.2 Non-Goals
 
 - Specifying the coding agent itself or the quality of its work.
 - Prescribing tracker-side workflow policy; that lives in the operator's prompt and tracker configuration.
 - Coordinating multiple orchestrator instances beyond per-item routing hints (assignee and labels).
 - Guaranteeing exactly-once effects inside the tracker or the repository; the agent owns its own idempotence.
 
-## Design Intent
+## 3. System Overview
 
-### Tracker supremacy
+One orchestrator process turns tracker issues into supervised coding-agent runs. The Configuration Authority reads the operator's workflow document and serves validated settings to everyone else. On a polling cadence the Scheduler asks the Tracker Adapter for issues in the active states, claims the ones it may run, and hands each to an Agent Run Supervisor. The supervisor has the Workspace Manager prepare the issue's workspace, then drives a coding agent through the Agent Session Protocol Client, turn by turn, while session events stream back into the Scheduler's claim telemetry. Runs that fail are retried with backoff into the same workspace. Runs that need a human are blocked until the tracker changes. Issues the tracker closes get their workspaces reclaimed. An optional Observability Surface projects all of it for operators.
 
-The tracker is the only durable authority on an item's state. The orchestrator holds claims, retry timers, and blocked entries as caches of intent, and every consequential decision re-reads the tracker first.
+### 3.1 Main Components
 
-Humans and other tools move items concurrently. An orchestrator that trusts its own memory will work on closed items or fight reassignment.
+One line per component, then its ownership. Generated from the same records as the rest of this document.
 
-Implications:
-
-- Running and blocked items are re-checked against the tracker every poll cycle.
-- An item is re-fetched and re-validated immediately before every agent spawn.
-- Tracker unavailability yields inaction, never guesses.
-
-### Fail toward retry, never toward duplication
-
-When an agent run ends for any reason other than operator input, the item stays claimed and re-enters through a backed-off retry that re-checks eligibility. The claim is the duplication guard.
-
-Unattended operation makes duplicate agents the most expensive failure: two agents on one item corrupt each other's workspace and tracker notes.
-
-Implications:
-
-- A claim persists across agent crashes, stalls, and capacity waits.
-- Retry delays grow and are capped by an operator parameter.
-- Only observed tracker-state change releases a claim.
-
-### Bounded blast radius for unattended agents
-
-Every mechanism that lets the agent act - workspace, sandbox policy, shell hooks, provider tools - is scoped to the single item being worked and denied ambient credentials.
-
-The service runs without a human in the loop; the only acceptable failure mode of a misbehaving agent is damage inside one workspace.
-
-Implications:
-
-- Workspace paths are canonicalized and must resolve inside the configured root.
-- Tracker credentials are withheld from the agent process environment.
-- Starting the service requires an explicit operator acknowledgement of unattended execution.
-
-### Last-known-good configuration
-
-Configuration is validated strictly at startup, then hot-reloaded; a reload that fails validation never replaces the running configuration.
-
-An operator edit must not be able to take down agents that are mid-run.
-
-Implications:
-
-- The service refuses to start on an invalid configuration.
-- A failed reload logs the error and keeps serving the previous settings.
-
-Notes:
-
-- A broken edit can go unnoticed while the stale configuration keeps working.
-
-### Provider capabilities stay behind the adapter
-
-The scheduler depends only on normalized read operations. Everything provider-specific - authentication, write operations, native agent tools - stays behind the tracker adapter boundary.
-
-Scheduling policy must not accrete per-provider special cases, and new trackers must be addable without touching the scheduler.
-
-Implications:
-
-- Adapters normalize items into one issue shape before the scheduler sees them.
-- Agent-side tracker mutations are optional provider-native tools, not scheduler features.
-
-## System Model
-
-### Core Concepts
-
-#### Workflow Document
-
-The single operator-editable artifact that configures one orchestrator: structured settings plus the prompt template handed to every agent run. It is read at startup and re-read while the service runs.
-
-Fields:
-
-- `settings` (structured map) — REQUIRED. Operator settings grouped by area (tracker, polling, workspace, worker, agent, codex, hooks, observability, server).
-- `prompt_template` (template text) — Template rendered per run with issue fields and attempt number; a built-in default applies when blank.
-
-- One document configures one orchestrator instance.
-- Values may reference environment variables for secrets and paths.
-
-#### Issue
-
-The normalized work item the scheduler operates on, produced by a tracker adapter from provider data. It is the unit of claiming, workspace assignment, and agent execution.
-
-Fields:
-
-- `id` (string) — REQUIRED. Stable dispatch identity within the configured tracker scope; the claim key.
-- `identifier` (string) — REQUIRED. Human-readable identity, unique in scope; derives the workspace key.
-- `title` (string) — REQUIRED. Short human summary; part of dispatch eligibility (must be present).
-- `description` (string) — Full body text made available to the prompt template.
-- `state` (string) — REQUIRED. Provider workflow state name; compared case-insensitively against the configured active and terminal state sets.
-- `priority` (integer) — Provider priority; ranks 1 (highest) through 4; absent or out-of-range sorts last.
-- `created_at` (timestamp) — Creation time; older items dispatch first within a priority rank.
-- `labels` (string list) — Provider labels, matched case-insensitively against required routing labels.
-- `dispatchable` (boolean) — REQUIRED. Adapter's verdict that this item is routed to this orchestrator (assignment, blockers, provider policy).
-- `blocked_by` (list) — Provider-side blocking relations the adapter folds into the dispatchable verdict.
-- `url` (string) — Human link surfaced in observability output.
-- `assignee_id` (string) — Provider assignee used for routing diagnostics.
-- `native_ref` (map) — Non-secret provider identifiers needed by provider-native agent tools.
-- `branch_name` (string) — Provider-suggested branch name exposed to the prompt template.
-- `updated_at` (timestamp) — Last provider update time, informational.
-
-
-#### Claim
-
-The orchestrator's exclusive, in-memory ownership of one issue. A claim is held while an agent runs, while a retry is pending, and while the issue is blocked on operator input. It is the guard against duplicate dispatch and it carries continuity data across attempts.
-
-- At most one claim exists per issue id.
-- A claim records attempt count, last error, worker host, and workspace path.
-- A claim is released only when the tracker shows the issue terminal, inactive, unrouted, or gone.
-
-#### Workspace
-
-An isolated directory dedicated to one issue, in which every agent run for that issue executes. Its location is derived deterministically from the issue identifier under an operator-configured root.
-
-- The same issue always maps to the same workspace path.
-- The workspace persists across turns and retries so agents resume work in place.
-- It is removed when the issue reaches a terminal tracker state.
-
-#### Agent Session
-
-One live connection to a coding-agent runtime, bound to a workspace and an issue. A session hosts one or more turns; each turn takes a prompt and runs until completion, failure, cancellation, or timeout.
-
-- A session is created per agent run and always torn down with it.
-- Session policies (approval, sandbox) are fixed at session start.
-
-#### Session Event
-
-A timestamped notification emitted during a session: lifecycle events, approval and input requests, tool calls, streamed output, and token usage. Events drive stall detection, blocked classification, and observability.
-
-- Every event carries an event kind and a timestamp.
-- Events may carry a session id, token usage, and rate-limit data.
-
-#### Worker Host
-
-A remote execution target on which workspaces are provisioned and agent sessions launched, addressed over an operator-configured transport. Present only when the remote-execution extension is configured.
-
-- Each host has a bounded number of concurrent agent slots.
-- An agent run is pinned to one host for its whole lifetime.
-
-### Concept Relationships
-
-**Workflow Document** governs **Claim**. Operator settings decide which issues may be claimed, how many run concurrently, and how retries and blocking behave.
-
-**Claim** owns **Issue**. A claim asserts exclusive local ownership of one issue for the duration of running, retrying, or blocked handling.
-
-**Issue** maps to **Workspace**. Each issue deterministically maps to exactly one workspace per execution target.
-
-**Agent Session** executes in **Workspace**. Every session runs with the issue's workspace as its working directory and writable scope.
-
-**Agent Session** works on **Issue**. A session receives the issue's content in its prompt and continues only while the issue remains active and routed here.
-
-**Agent Session** emits **Session Event**. Sessions stream events that the scheduler folds into claim telemetry and blocked/stall decisions.
-
-**Worker Host** hosts **Workspace**. Under the remote-execution extension, a workspace is provisioned on the worker host selected for the run.
-
-### Responsibilities and Ownership
+- **Configuration Authority** — Own the loading, validation, hot reload, and serving of the workflow document so every other responsibility reads one consistent, always-valid view of operator intent.
+- **Scheduler** — Own the claim ledger and the polling loop.
+- **Agent Run Supervisor** — Own one agent run end to end.
+- **Agent Session Protocol Client** — Own the wire conversation with the coding-agent runtime.
+- **Tracker Adapter** — Own the boundary to the issue provider.
+- **Workspace Manager** — Own the safety and lifecycle of per-issue workspaces.
+- **Observability Surface** (Optional Extension) — Own the operator-facing view.
 
 #### Configuration Authority
 
@@ -347,7 +205,7 @@ Requirements:
 
 - No create or remove operation may act on a path outside the configured root.
 
-#### Observability Surface
+#### Observability Surface (Optional Extension)
 
 Own the operator-facing view: fold session events into telemetry and expose orchestrator status through a live dashboard and a query API.
 
@@ -365,331 +223,324 @@ Requirements:
 
 - Observability MUST degrade gracefully when the scheduler is slow or absent.
 
-## Configuration Specification
+### 3.2 External Dependencies
 
-Each field below must exist and be operator-settable. Keys are reference names used by this document, not required spellings. Concrete names, formats, and defaults are implementation-defined unless fixed elsewhere. The stated semantics are normative.
+A conforming deployment requires this environment.
 
-### `polling.interval_ms` — Poll interval
+- One reachable issue-tracker API with credentials for the configured provider.
+- A local filesystem for workspaces and logs.
+- An installed coding-agent runtime launchable by the configured agent command.
+- Host-environment authentication for the coding-agent runtime itself.
+- Remote-execution extension only - worker hosts reachable over the configured transport, meeting the same workspace and runtime prerequisites.
 
-How often the scheduler runs a poll cycle (reconcile plus dispatch).
+## 4. Core Domain Model
 
-- Must be a positive duration.
-- Each completed cycle schedules the next one after this interval.
-- Changes apply when the next cycle schedules its successor, without restart.
+### 4.1 Entities
 
-Used by **Poll Cycle**.
+One line per entity, then its full definition. Generated from the same records as the rest of this document.
 
-### `tracker.kind` — Tracker kind
+- **Workflow Document** — The single operator-editable artifact that configures one orchestrator: structured settings plus the prompt template handed to every agent run.
+- **Issue** — The normalized work item the scheduler operates on, produced by a tracker adapter from provider data.
+- **Claim** — The orchestrator's exclusive, in-memory ownership of one issue.
+- **Workspace** — An isolated directory dedicated to one issue, in which every agent run for that issue executes.
+- **Agent Session** — One live connection to a coding-agent runtime, bound to a workspace and an issue.
+- **Session Event** — A timestamped notification emitted during a session: lifecycle events, approval and input requests, tool calls, streamed output, and token usage.
+- **Worker Host** (Optional Extension) — A remote execution target on which workspaces are provisioned and agent sessions launched, addressed over an operator-configured transport.
 
-Which tracker adapter the orchestrator uses.
+#### Workflow Document
 
-- Must name an adapter in the implementation's registry.
-- Absent or unknown kinds fail configuration validation.
+The single operator-editable artifact that configures one orchestrator: structured settings plus the prompt template handed to every agent run. It is read at startup and re-read while the service runs.
 
-Used by **Tracker Adapter Contract**, **Load Configuration at Startup**.
+Fields:
 
-### `tracker.provider` — Tracker provider settings
+- `settings` (structured map) — REQUIRED. Operator settings grouped by area (tracker, polling, workspace, worker, agent, codex, hooks, observability, server).
+- `prompt_template` (template text) — Template rendered per run with issue fields and attempt number; a built-in default applies when blank.
 
-Provider-specific connection settings - endpoint, project scope, credentials, assignee identity - owned by the selected adapter.
+- One document configures one orchestrator instance.
+- Values may reference environment variables for secrets and paths.
 
-- Contents are adapter-defined; the adapter validates them at load time.
-- Credential values may be environment references and resolve at load.
-- Resolved credentials feed the adapter and its tools, never the agent environment.
+#### Issue
 
-Used by **Tracker Adapter Contract**, **Tracker Secrets Never Reach the Agent**.
+The normalized work item the scheduler operates on, produced by a tracker adapter from provider data. It is the unit of claiming, workspace assignment, and agent execution.
 
-### `tracker.active_states` — Active tracker states
+Fields:
 
-The tracker state names that make an issue eligible for dispatch and for turn continuation.
+- `id` (string) — REQUIRED. Stable dispatch identity within the configured tracker scope; the claim key.
+- `identifier` (string) — REQUIRED. Human-readable identity, unique in scope; derives the workspace key.
+- `title` (string) — REQUIRED. Short human summary; part of dispatch eligibility (must be present).
+- `description` (string) — Full body text made available to the prompt template.
+- `state` (string) — REQUIRED. Provider workflow state name; compared case-insensitively against the configured active and terminal state sets.
+- `priority` (integer) — Provider priority; ranks 1 (highest) through 4; absent or out-of-range sorts last.
+- `created_at` (timestamp) — Creation time; older items dispatch first within a priority rank.
+- `labels` (string list) — Provider labels, matched case-insensitively against required routing labels.
+- `dispatchable` (boolean) — REQUIRED. Adapter's verdict that this item is routed to this orchestrator (assignment, blockers, provider policy).
+- `blocked_by` (list) — Provider-side blocking relations the adapter folds into the dispatchable verdict.
+- `url` (string) — Human link surfaced in observability output.
+- `assignee_id` (string) — Provider assignee used for routing diagnostics.
+- `native_ref` (map) — Non-secret provider identifiers needed by provider-native agent tools.
+- `branch_name` (string) — Provider-suggested branch name exposed to the prompt template.
+- `updated_at` (timestamp) — Last provider update time, informational.
 
-- Matched case-insensitively after trimming.
-- Adapters may supply provider-appropriate defaults.
-- An issue outside these states is never dispatched and stops continuing.
 
-Used by **Poll Cycle**, **Dispatch Issue**, **Agent Run**.
+#### Claim
 
-### `tracker.terminal_states` — Terminal tracker states
+The orchestrator's exclusive, in-memory ownership of one issue. A claim is held while an agent runs, while a retry is pending, and while the issue is blocked on operator input. It is the guard against duplicate dispatch and it carries continuity data across attempts.
 
-The tracker state names that mean an issue is finished and its workspace reclaimable.
+- At most one claim exists per issue id.
+- A claim records attempt count, last error, worker host, and workspace path.
+- A claim is released only when the tracker shows the issue terminal, inactive, unrouted, or gone.
 
-- Matched case-insensitively after trimming.
-- A terminal issue's agent stops, its claim releases, and its workspace is removed.
-- Adapters may supply provider-appropriate defaults.
+#### Workspace
 
-Used by **Reconcile Claims Against Tracker**, **Remove Workspace for Finished Issue**.
+An isolated directory dedicated to one issue, in which every agent run for that issue executes. Its location is derived deterministically from the issue identifier under an operator-configured root.
 
-### `tracker.required_labels` — Required routing labels
+- The same issue always maps to the same workspace path.
+- The workspace persists across turns and retries so agents resume work in place.
+- It is removed when the issue reaches a terminal tracker state.
 
-Labels an issue must carry (all of them) to be routed to this orchestrator.
+#### Agent Session
 
-- Matched case-insensitively after trimming.
-- An empty list requires nothing.
-- Losing a required label mid-run stops the agent and releases the claim.
+One live connection to a coding-agent runtime, bound to a workspace and an issue. A session hosts one or more turns; each turn takes a prompt and runs until completion, failure, cancellation, or timeout.
 
-Used by **Dispatch Issue**, **Reconcile Claims Against Tracker**.
+- A session is created per agent run and always torn down with it.
+- Session policies (approval, sandbox) are fixed at session start.
 
-### `workspace.root` — Workspace root
+#### Session Event
 
-The directory under which every per-issue workspace lives; the local blast radius granted to agents.
+A timestamped notification emitted during a session: lifecycle events, approval and input requests, tool calls, streamed output, and token usage. Events drive stall detection, blocked classification, and observability.
 
-- Relative values resolve against the workflow document's directory.
-- May be an environment reference.
-- All workspace creation and removal is contained under this root.
+- Every event carries an event kind and a timestamp.
+- Events may carry a session id, token usage, and rate-limit data.
 
-Used by **Provision Workspace**, **Workspace Operations Stay Inside the Root**.
+#### Worker Host (Optional Extension)
 
-### `agent.max_concurrent_agents` — Global concurrency cap
+A remote execution target on which workspaces are provisioned and agent sessions launched, addressed over an operator-configured transport. Present only when the remote-execution extension is configured.
 
-The maximum number of agent runs executing concurrently.
+- Each host has a bounded number of concurrent agent slots.
+- An agent run is pinned to one host for its whole lifetime.
 
-- Must be a positive integer.
-- Admission never exceeds it; deferred issues stay eligible.
-- Re-read every poll cycle; new admissions honor the new value.
+### 4.2 Relationships
 
-Used by **Dispatch Issue**, **Concurrency Never Exceeds Configured Caps**.
+**Workflow Document** governs **Claim**. Operator settings decide which issues may be claimed, how many run concurrently, and how retries and blocking behave.
 
-### `agent.max_concurrent_agents_by_state` — Per-state concurrency caps
+**Claim** owns **Issue**. A claim asserts exclusive local ownership of one issue for the duration of running, retrying, or blocked handling.
 
-Optional per-tracker-state overrides of the concurrency cap.
+**Issue** maps to **Workspace**. Each issue deterministically maps to exactly one workspace per execution target.
 
-- Keys are state names, matched case-insensitively; values are positive integers.
-- A state without an override uses the global cap.
+**Agent Session** executes in **Workspace**. Every session runs with the issue's workspace as its working directory and writable scope.
 
-Used by **Dispatch Issue**, **Concurrency Never Exceeds Configured Caps**.
+**Agent Session** works on **Issue**. A session receives the issue's content in its prompt and continues only while the issue remains active and routed here.
 
-### `agent.max_turns` — Turn budget per run
+**Agent Session** emits **Session Event**. Sessions stream events that the scheduler folds into claim telemetry and blocked/stall decisions.
 
-How many turns one agent run may execute before returning control to the scheduler.
+**Worker Host** hosts **Workspace**. Under the remote-execution extension, a workspace is provisioned on the worker host selected for the run.
 
-- Must be a positive integer.
-- Reaching the budget with the issue still active ends the run normally.
+## 5. Design Intent
 
-Used by **Agent Run**, **Turn Budget Bounds Every Run**.
+### Tracker supremacy
 
-### `agent.max_retry_backoff_ms` — Maximum retry backoff
+The tracker is the only durable authority on an item's state. The orchestrator holds claims, retry timers, and blocked entries as caches of intent, and every consequential decision re-reads the tracker first.
 
-The upper bound on the delay between consecutive failure retries of one issue.
+Humans and other tools move items concurrently. An orchestrator that trusts its own memory will work on closed items or fight reassignment.
 
-- Must be a positive duration.
-- Failure retry delays grow up to and never beyond this value.
+Implications:
 
-Used by **Retry a Claimed Issue**, **Failure Retries Back Off Within a Cap**.
+- Running and blocked items are re-checked against the tracker every poll cycle.
+- An item is re-fetched and re-validated immediately before every agent spawn.
+- Tracker unavailability yields inaction, never guesses.
 
-### `codex.command` — Agent runtime command
+### Fail toward retry, never toward duplication
 
-The command line that launches the coding-agent runtime for each session.
+When an agent run ends for any reason other than operator input, the item stays claimed and re-enters through a backed-off retry that re-checks eligibility. The claim is the duplication guard.
 
-- Must be non-blank.
-- Runs with the workspace as working directory on the run's execution target.
-- Operator-supplied arguments pass through to the runtime.
+Unattended operation makes duplicate agents the most expensive failure: two agents on one item corrupt each other's workspace and tracker notes.
 
-Used by **Agent Session Protocol**.
+Implications:
 
-### `codex.approval_policy` — Approval policy
+- A claim persists across agent crashes, stalls, and capacity waits.
+- Retry delays grow and are capped by an operator parameter.
+- Only observed tracker-state change releases a claim.
 
-How mid-turn approval requests are answered.
+### Bounded blast radius for unattended agents
 
-- A dedicated auto-approve value grants approvals for the session automatically.
-- Any other policy turns approval requests into blocking outcomes.
-- Structured policy values pass through to the runtime unchanged.
+Every mechanism that lets the agent act - workspace, sandbox policy, shell hooks, provider tools - is scoped to the single item being worked and denied ambient credentials.
 
-Used by **Handle Mid-Turn Requests**.
+The service runs without a human in the loop; the only acceptable failure mode of a misbehaving agent is damage inside one workspace.
 
-### `codex.thread_sandbox` — Session sandbox mode
+Implications:
 
-The sandbox mode declared for the whole agent session.
+- Workspace paths are canonicalized and must resolve inside the configured root.
+- Tracker credentials are withheld from the agent process environment.
+- Starting the service requires an explicit operator acknowledgement of unattended execution.
 
-- Passed to the runtime at session start.
+### Last-known-good configuration
 
-Used by **Agent Session Protocol**.
+Configuration is validated strictly at startup, then hot-reloaded; a reload that fails validation never replaces the running configuration.
 
-### `codex.turn_sandbox_policy` — Turn sandbox policy
+An operator edit must not be able to take down agents that are mid-run.
 
-The filesystem and network policy applied to each turn.
+Implications:
 
-- When set, the operator's structured policy passes through unchanged.
-- When unset, a default policy grants write access to the workspace only.
-- The default's workspace path is canonicalized for local runs.
+- The service refuses to start on an invalid configuration.
+- A failed reload logs the error and keeps serving the previous settings.
 
-Used by **Agent Session Protocol**, **Agent Run**.
+Notes:
 
-### `codex.turn_timeout_ms` — Turn inactivity timeout
+- A broken edit can go unnoticed while the stale configuration keeps working.
 
-How long a turn may stay silent before it is failed.
+### Provider capabilities stay behind the adapter
 
-- Must be a positive duration.
-- Resets on every received stream event.
+The scheduler depends only on normalized read operations. Everything provider-specific - authentication, write operations, native agent tools - stays behind the tracker adapter boundary.
 
-Used by **Agent Run**, **Turn Inactivity Timeout**.
+Scheduling policy must not accrete per-provider special cases, and new trackers must be addable without touching the scheduler.
 
-### `codex.read_timeout_ms` — Control response timeout
+Implications:
 
-How long the client waits for a direct protocol response during session setup.
+- Adapters normalize items into one issue shape before the scheduler sees them.
+- Agent-side tracker mutations are optional provider-native tools, not scheduler features.
 
-- Must be a positive duration.
-- Expiry fails the pending control operation.
+## 6. Configuration Specification
 
-Used by **Agent Session Protocol**.
+Each field below must exist and be operator-settable. Keys are reference names used by this document, not required spellings. Concrete names, formats, and defaults are implementation-defined unless fixed elsewhere. The stated semantics are normative. One entry per field; sub-bullets give its semantics, reload behavior, and the behaviors it governs.
 
-### `codex.stall_timeout_ms` — Stall timeout
-
-How long a running agent may go without observable session activity before stall recovery acts.
-
-- Zero or negative disables stall detection.
-- Expiry triggers restart-with-backoff, or blocking when input was requested.
-
-Used by **Detect and Recover Stalled Runs**.
-
-### `hooks.after_create` — Bootstrap hook
-
-The shell command that initializes a newly created workspace (for example, cloning the repository).
-
-- Runs only when the workspace directory was newly created.
-- Failure or timeout removes the fresh workspace and fails provisioning.
-
-Used by **Provision Workspace**.
-
-### `hooks.before_run` — Pre-run hook
-
-The shell command run in the workspace before each agent session starts.
-
-- Failure aborts the run before any session starts.
-
-Used by **Agent Run**.
-
-### `hooks.after_run` — Post-run hook
-
-The shell command run in the workspace after each agent run, on every exit path.
-
-- Failures are logged and ignored.
-
-Used by **Agent Run**.
-
-### `hooks.before_remove` — Pre-removal hook
-
-The shell command run in the workspace before it is removed (for example, salvaging artifacts).
-
-- Failure or timeout never prevents the removal.
-
-Used by **Remove Workspace for Finished Issue**.
-
-### `hooks.timeout_ms` — Hook timeout
-
-The shared execution timeout for every workspace hook.
-
-- Must be a positive duration.
-- A timed-out hook is terminated and treated as failed per its hook point.
-
-Used by **Workspace Lifecycle Hooks**.
-
-### `workflow.prompt_template` — Prompt template
-
-The template rendered into each run's first-turn prompt; the operator's entire tracker-workflow policy for the agent lives here.
-
-- Receives every issue field and the attempt number.
-- Rendering is strict; unknown variables fail the run.
-- Blank templates fall back to a documented built-in default.
-
-Used by **Agent Run**, **Workflow Document**.
-
-### `worker.ssh_hosts` — Worker hosts
-
-The remote worker hosts on which workspaces and agent sessions run.
-
-- An empty list means local execution.
-- Each entry names one reachable execution target.
-
-Used by **Run Agents on Remote Worker Hosts**.
-
-### `worker.max_concurrent_agents_per_host` — Per-host concurrency cap
-
-The maximum concurrent agent runs on any single worker host.
-
-- Must be a positive integer when set; unset means unlimited per host.
-- Host selection skips hosts at their cap; all-full defers dispatch.
-
-Used by **Run Agents on Remote Worker Hosts**, **Concurrency Never Exceeds Configured Caps**.
-
-### `observability.dashboard_enabled` — Terminal dashboard toggle
-
-Whether the terminal status dashboard renders.
-
-- Disabling stops rendering without affecting scheduling or the API.
-
-Used by **Observe Orchestrator Status**.
-
-### `observability.refresh_ms` — Dashboard refresh cadence
-
-The periodic re-render cadence of the terminal dashboard.
-
-- Must be a positive duration.
-
-Used by **Observe Orchestrator Status**.
-
-### `observability.render_interval_ms` — Render coalescing interval
-
-The minimum spacing between dashboard renders when updates arrive rapidly.
-
-- Must be a positive duration.
-- Bursts of updates coalesce into one render per interval.
-
-Used by **Observe Orchestrator Status**.
-
-### `server.port` — Observability server port
-
-The TCP port for the HTTP observability surface.
-
-- Unset disables the HTTP surface entirely.
-- Zero requests an ephemeral port; the bound port is discoverable.
-- An invocation-time override takes precedence over the document value.
-
-Used by **Observability API and Dashboards**.
-
-### `server.host` — Observability bind host
-
-The address the HTTP observability surface binds to.
-
-- Defaults to a loopback-only bind.
-
-Used by **Observability API and Dashboards**.
-
-### Config Fields Summary (Cheat Sheet)
-
-One line per field. Generated from the same records as the full entries above.
+### 6.1 Core Fields
 
 - `polling.interval_ms` — How often the scheduler runs a poll cycle (reconcile plus dispatch).
+  - Must be a positive duration.
+  - Each completed cycle schedules the next one after this interval.
+  - Reload: Changes apply when the next cycle schedules its successor, without restart.
+  - Used by **Poll Cycle**.
 - `tracker.kind` — Which tracker adapter the orchestrator uses.
+  - Must name an adapter in the implementation's registry.
+  - Absent or unknown kinds fail configuration validation.
+  - Used by **Tracker Adapter Contract**, **Load Configuration at Startup**.
 - `tracker.provider` — Provider-specific connection settings - endpoint, project scope, credentials, assignee identity - owned by the selected adapter.
+  - Contents are adapter-defined; the adapter validates them at load time.
+  - Credential values may be environment references and resolve at load.
+  - Resolved credentials feed the adapter and its tools, never the agent environment.
+  - Used by **Tracker Adapter Contract**, **Tracker Secrets Never Reach the Agent**.
 - `tracker.active_states` — The tracker state names that make an issue eligible for dispatch and for turn continuation.
+  - Matched case-insensitively after trimming.
+  - Adapters may supply provider-appropriate defaults.
+  - An issue outside these states is never dispatched and stops continuing.
+  - Used by **Poll Cycle**, **Dispatch Issue**, **Agent Run**.
 - `tracker.terminal_states` — The tracker state names that mean an issue is finished and its workspace reclaimable.
+  - Matched case-insensitively after trimming.
+  - A terminal issue's agent stops, its claim releases, and its workspace is removed.
+  - Adapters may supply provider-appropriate defaults.
+  - Used by **Reconcile Claims Against Tracker**, **Remove Workspace for Finished Issue**.
 - `tracker.required_labels` — Labels an issue must carry (all of them) to be routed to this orchestrator.
+  - Matched case-insensitively after trimming.
+  - An empty list requires nothing.
+  - Losing a required label mid-run stops the agent and releases the claim.
+  - Used by **Dispatch Issue**, **Reconcile Claims Against Tracker**.
 - `workspace.root` — The directory under which every per-issue workspace lives; the local blast radius granted to agents.
+  - Relative values resolve against the workflow document's directory.
+  - May be an environment reference.
+  - All workspace creation and removal is contained under this root.
+  - Used by **Provision Workspace**, **Workspace Operations Stay Inside the Root**.
 - `agent.max_concurrent_agents` — The maximum number of agent runs executing concurrently.
+  - Must be a positive integer.
+  - Admission never exceeds it; deferred issues stay eligible.
+  - Reload: Re-read every poll cycle; new admissions honor the new value.
+  - Used by **Dispatch Issue**, **Concurrency Never Exceeds Configured Caps**.
 - `agent.max_concurrent_agents_by_state` — Optional per-tracker-state overrides of the concurrency cap.
+  - Keys are state names, matched case-insensitively; values are positive integers.
+  - A state without an override uses the global cap.
+  - Used by **Dispatch Issue**, **Concurrency Never Exceeds Configured Caps**.
 - `agent.max_turns` — How many turns one agent run may execute before returning control to the scheduler.
+  - Must be a positive integer.
+  - Reaching the budget with the issue still active ends the run normally.
+  - Used by **Agent Run**, **Turn Budget Bounds Every Run**.
 - `agent.max_retry_backoff_ms` — The upper bound on the delay between consecutive failure retries of one issue.
+  - Must be a positive duration.
+  - Failure retry delays grow up to and never beyond this value.
+  - Used by **Retry a Claimed Issue**, **Failure Retries Back Off Within a Cap**.
 - `codex.command` — The command line that launches the coding-agent runtime for each session.
+  - Must be non-blank.
+  - Runs with the workspace as working directory on the run's execution target.
+  - Operator-supplied arguments pass through to the runtime.
+  - Used by **Agent Session Protocol**.
 - `codex.approval_policy` — How mid-turn approval requests are answered.
+  - A dedicated auto-approve value grants approvals for the session automatically.
+  - Any other policy turns approval requests into blocking outcomes.
+  - Structured policy values pass through to the runtime unchanged.
+  - Used by **Handle Mid-Turn Requests**.
 - `codex.thread_sandbox` — The sandbox mode declared for the whole agent session.
+  - Passed to the runtime at session start.
+  - Used by **Agent Session Protocol**.
 - `codex.turn_sandbox_policy` — The filesystem and network policy applied to each turn.
+  - When set, the operator's structured policy passes through unchanged.
+  - When unset, a default policy grants write access to the workspace only.
+  - The default's workspace path is canonicalized for local runs.
+  - Used by **Agent Session Protocol**, **Agent Run**.
 - `codex.turn_timeout_ms` — How long a turn may stay silent before it is failed.
+  - Must be a positive duration.
+  - Resets on every received stream event.
+  - Used by **Agent Run**, **Turn Inactivity Timeout**.
 - `codex.read_timeout_ms` — How long the client waits for a direct protocol response during session setup.
+  - Must be a positive duration.
+  - Expiry fails the pending control operation.
+  - Used by **Agent Session Protocol**.
 - `codex.stall_timeout_ms` — How long a running agent may go without observable session activity before stall recovery acts.
+  - Zero or negative disables stall detection.
+  - Expiry triggers restart-with-backoff, or blocking when input was requested.
+  - Used by **Detect and Recover Stalled Runs**.
 - `hooks.after_create` — The shell command that initializes a newly created workspace (for example, cloning the repository).
+  - Runs only when the workspace directory was newly created.
+  - Failure or timeout removes the fresh workspace and fails provisioning.
+  - Used by **Provision Workspace**.
 - `hooks.before_run` — The shell command run in the workspace before each agent session starts.
+  - Failure aborts the run before any session starts.
+  - Used by **Agent Run**.
 - `hooks.after_run` — The shell command run in the workspace after each agent run, on every exit path.
+  - Failures are logged and ignored.
+  - Used by **Agent Run**.
 - `hooks.before_remove` — The shell command run in the workspace before it is removed (for example, salvaging artifacts).
+  - Failure or timeout never prevents the removal.
+  - Used by **Remove Workspace for Finished Issue**.
 - `hooks.timeout_ms` — The shared execution timeout for every workspace hook.
+  - Must be a positive duration.
+  - A timed-out hook is terminated and treated as failed per its hook point.
+  - Used by **Workspace Lifecycle Hooks**.
 - `workflow.prompt_template` — The template rendered into each run's first-turn prompt; the operator's entire tracker-workflow policy for the agent lives here.
-- `worker.ssh_hosts` — The remote worker hosts on which workspaces and agent sessions run.
-- `worker.max_concurrent_agents_per_host` — The maximum concurrent agent runs on any single worker host.
-- `observability.dashboard_enabled` — Whether the terminal status dashboard renders.
-- `observability.refresh_ms` — The periodic re-render cadence of the terminal dashboard.
-- `observability.render_interval_ms` — The minimum spacing between dashboard renders when updates arrive rapidly.
-- `server.port` — The TCP port for the HTTP observability surface.
-- `server.host` — The address the HTTP observability surface binds to.
+  - Receives every issue field and the attempt number.
+  - Rendering is strict; unknown variables fail the run.
+  - Blank templates fall back to a documented built-in default.
+  - Used by **Agent Run**, **Workflow Document**.
 
-## 1. Configuration and Reload
+### 6.2 Extension Fields
+
+These fields exist only when their extension is implemented.
+
+- `worker.ssh_hosts` — The remote worker hosts on which workspaces and agent sessions run.
+  - An empty list means local execution.
+  - Each entry names one reachable execution target.
+  - Used by **Run Agents on Remote Worker Hosts**.
+- `worker.max_concurrent_agents_per_host` — The maximum concurrent agent runs on any single worker host.
+  - Must be a positive integer when set; unset means unlimited per host.
+  - Host selection skips hosts at their cap; all-full defers dispatch.
+  - Used by **Run Agents on Remote Worker Hosts**, **Concurrency Never Exceeds Configured Caps**.
+- `observability.dashboard_enabled` — Whether the terminal status dashboard renders.
+  - Disabling stops rendering without affecting scheduling or the API.
+  - Used by **Observe Orchestrator Status**.
+- `observability.refresh_ms` — The periodic re-render cadence of the terminal dashboard.
+  - Must be a positive duration.
+  - Used by **Observe Orchestrator Status**.
+- `observability.render_interval_ms` — The minimum spacing between dashboard renders when updates arrive rapidly.
+  - Must be a positive duration.
+  - Bursts of updates coalesce into one render per interval.
+  - Used by **Observe Orchestrator Status**.
+- `server.port` — The TCP port for the HTTP observability surface.
+  - Unset disables the HTTP surface entirely.
+  - Zero requests an ephemeral port; the bound port is discoverable.
+  - An invocation-time override takes precedence over the document value.
+  - Used by **Observability API and Dashboards**.
+- `server.host` — The address the HTTP observability surface binds to.
+  - Defaults to a loopback-only bind.
+  - Used by **Observability API and Dashboards**.
+
+## 7. Configuration and Reload
 
 How operator intent enters the system: one workflow document, strict validation at startup, hot reload while running, and the last-known-good guarantee that protects mid-run agents from bad edits.
 
@@ -907,7 +758,7 @@ Validation checks:
 - Break the document mid-run and verify settings reads, agents, and claims are unaffected.
 - Fix the document and verify the new settings apply without restart.
 
-## 2. Scheduling and Dispatch
+## 8. Scheduling and Dispatch
 
 The poll cycle that turns active tracker issues into supervised agent runs: candidate ordering, eligibility, the claim as duplication guard, capacity limits, and last-moment revalidation before every spawn.
 
@@ -1090,7 +941,7 @@ Validation checks:
 
 - Force spawn failure and verify a retry entry exists with the error and an increased attempt.
 
-## 3. Claim Lifecycle, Retry, and Blocking
+## 9. Claim Lifecycle, Retry, and Blocking
 
 What happens to an issue after it is claimed: the lifecycle of a claim, reconciliation that lets tracker state override local state, backed-off retries that never duplicate, stall recovery, and the blocked handling that holds issues waiting on a human.
 
@@ -1368,7 +1219,7 @@ Validation checks:
 - Trigger each blocker class (approval, freeform input, elicitation) and verify a blocked claim with a reason.
 - Verify no automatic retry occurs while blocked.
 
-## 4. Agent Session Execution
+## 10. Agent Session Execution
 
 One agent run from the inside: the session protocol, the prompt built from the operator's template, the bounded turn loop that re-checks the tracker between turns, mid-turn approval and input handling, and the secrecy line between orchestrator credentials and agent commands.
 
@@ -1534,7 +1385,7 @@ Validation checks:
 - Stream periodic events longer than the timeout and verify no firing.
 - Go silent past the timeout and verify the turn fails with a timeout error.
 
-## 5. Tracker Adapter Boundary
+## 11. Tracker Adapter Boundary
 
 The contract every issue provider implements: normalized read operations the scheduler relies on, and the optional provider-native agent tools whose bindings are frozen per session.
 
@@ -1647,7 +1498,7 @@ Validation checks:
 
 - Trigger each failure class and verify a structured failure reply with the turn continuing.
 
-## 6. Workspace Provisioning and Safety
+## 12. Workspace Provisioning and Safety
 
 The per-issue directory every run executes in: deterministic identity, containment under the operator's root, lifecycle hooks for bootstrap and salvage, reuse across attempts, and removal when the tracker says the work is done.
 
@@ -1846,7 +1697,7 @@ Validation checks:
 - Fail and time out before_remove and verify removal still completes.
 - Fail after_run and verify the run's outcome is unchanged.
 
-## 7. Remote Execution (Optional Extension)
+## 13. Remote Execution (Optional Extension)
 
 Running workspaces and agent sessions on remote worker hosts: host selection with per-host caps, one-host-per-run affinity, and remote failure handling that surfaces to the normal retry path.
 
@@ -1928,7 +1779,7 @@ Validation checks:
 - Fail a remote launch and verify the run fails with the reason, without a host hop.
 - Verify remote commands cannot hang past their timeout.
 
-## 8. Observability (Optional Extension)
+## 14. Observability (Optional Extension)
 
 The operator's window: session telemetry folded into claim status, terminal and browser dashboards, a JSON status API, manual refresh, and accounting that stays truthful under noisy runtime reports.
 
@@ -2044,7 +1895,7 @@ Validation checks:
 - Make the scheduler unresponsive and verify an explicit timeout result and a live surface.
 - Stop the scheduler and verify an explicit unavailable result.
 
-## Implementation-Defined Areas
+## 15. Implementation-Defined Areas
 
 ### Configuration document syntax
 
@@ -2186,17 +2037,17 @@ A conforming implementation must document:
 
 - Each shipped adapter's default state sets.
 
-## Reference Implementation
+## 16. Reference Implementation
 
 The Elixir application under elixir/ in the openai/symphony repository, pinned at commit 8001b52e3062495a16e520e4ceaf8f9de868c4d0 (2026-08-12). All evidence citations in spec/evidence.yaml resolve against this revision, relative to the elixir/ directory. It is one realization of this specification and adds no requirements.
 
 The reference implementation is **not normative**; it is one realization of this specification.
 
-## Test and Validation Matrix
+## 17. Test and Validation Matrix
 
 Checks assembled from the verification clauses of this specification. A conforming implementation should be able to demonstrate each of them. Checks under an optional extension apply only when that extension is implemented.
 
-### 1. Configuration and Reload
+### 17.1 Configuration and Reload
 
 - **Workflow Document** — Load a document exercising defaults, environment references, and a template, and verify the resolved settings and rendered prompt.
 - **Service Invocation** — Invoke without the acknowledgement and verify the banner and nonzero exit.
@@ -2214,7 +2065,7 @@ Checks assembled from the verification clauses of this specification. A conformi
 - **Invalid Configuration on Reload** — Break the document mid-run and verify settings reads, agents, and claims are unaffected.
 - **Invalid Configuration on Reload** — Fix the document and verify the new settings apply without restart.
 
-### 2. Scheduling and Dispatch
+### 17.2 Scheduling and Dispatch
 
 - **Poll Cycle** — Observe that a cycle runs shortly after startup and then at the configured interval.
 - **Poll Cycle** — Issue several refresh requests during one cycle and verify only one additional cycle results.
@@ -2236,7 +2087,7 @@ Checks assembled from the verification clauses of this specification. A conformi
 - **Tracker Fetch Failure** — Fail a retry refetch and verify the retry reschedules with a larger delay.
 - **Agent Spawn Failure** — Force spawn failure and verify a retry entry exists with the error and an increased attempt.
 
-### 3. Claim Lifecycle, Retry, and Blocking
+### 17.3 Claim Lifecycle, Retry, and Blocking
 
 - **Reconcile Claims Against Tracker** — Move a running issue to a terminal state and verify the agent stops and the workspace is removed.
 - **Reconcile Claims Against Tracker** — Remove a required label from a running issue and verify the agent stops and the workspace is kept.
@@ -2266,7 +2117,7 @@ Checks assembled from the verification clauses of this specification. A conformi
 - **Operator Input Required** — Trigger each blocker class (approval, freeform input, elicitation) and verify a blocked claim with a reason.
 - **Operator Input Required** — Verify no automatic retry occurs while blocked.
 
-### 4. Agent Session Execution
+### 17.4 Agent Session Execution
 
 - **Agent Run** — Keep an issue active and verify the run continues with follow-up turns until the turn budget.
 - **Agent Run** — Verify a run at the turn budget returns to the scheduler and a later run resumes the same workspace.
@@ -2287,7 +2138,7 @@ Checks assembled from the verification clauses of this specification. A conformi
 - **Turn Inactivity Timeout** — Stream periodic events longer than the timeout and verify no firing.
 - **Turn Inactivity Timeout** — Go silent past the timeout and verify the turn fails with a timeout error.
 
-### 5. Tracker Adapter Boundary
+### 17.5 Tracker Adapter Boundary
 
 - **Tracker Adapter Contract** — Drive the scheduler against the in-memory adapter and verify identical scheduling behavior to a provider adapter.
 - **Tracker Adapter Contract** — Feed a malformed provider item and verify it never reaches the scheduler.
@@ -2297,7 +2148,7 @@ Checks assembled from the verification clauses of this specification. A conformi
 - **Session-Start Tool Binding Is Immutable** — Reload the configuration with different tracker settings mid-session and verify tool calls still use the snapshot.
 - **Provider Tool Call Failure** — Trigger each failure class and verify a structured failure reply with the turn continuing.
 
-### 6. Workspace Provisioning and Safety
+### 17.6 Workspace Provisioning and Safety
 
 - **Provision Workspace** — Provision the same issue twice and verify the same path with contents preserved.
 - **Provision Workspace** — Provision two identifiers that sanitize identically and verify distinct paths.
@@ -2322,7 +2173,7 @@ Checks assembled from the verification clauses of this specification. A conformi
 - **Non-Blocking Hook Failure** — Fail and time out before_remove and verify removal still completes.
 - **Non-Blocking Hook Failure** — Fail after_run and verify the run's outcome is unchanged.
 
-### 7. Remote Execution (Optional Extension)
+### 17.7 Remote Execution (Optional Extension)
 
 - **Run Agents on Remote Worker Hosts** — Fill one host to its cap and verify new runs land on another host.
 - **Run Agents on Remote Worker Hosts** — Fill every host and verify dispatch defers with the claim intact.
@@ -2333,7 +2184,7 @@ Checks assembled from the verification clauses of this specification. A conformi
 - **Remote Execution Failure** — Fail a remote launch and verify the run fails with the reason, without a host hop.
 - **Remote Execution Failure** — Verify remote commands cannot hang past their timeout.
 
-### 8. Observability (Optional Extension)
+### 17.8 Observability (Optional Extension)
 
 - **Observe Orchestrator Status** — Emit a session event and verify the snapshot reflects the session id and last event.
 - **Observe Orchestrator Status** — Verify a snapshot lists retry entries with attempt and due time, and blocked entries with reasons.
@@ -2346,11 +2197,11 @@ Checks assembled from the verification clauses of this specification. A conformi
 - **Status Snapshot Unavailable** — Make the scheduler unresponsive and verify an explicit timeout result and a live surface.
 - **Status Snapshot Unavailable** — Stop the scheduler and verify an explicit unavailable result.
 
-## Implementation Checklist (Definition of Done)
+## 18. Implementation Checklist (Definition of Done)
 
 Generated from the specification graph. Intentionally redundant with the body.
 
-### Core
+### 18.1 Core
 
 - Interactions: **Load Configuration at Startup**, **Hot-Reload Configuration**, **Poll Cycle**, **Dispatch Issue**, **Reconcile Claims Against Tracker**, **Retry a Claimed Issue**, **Block an Issue on Operator Input**, **Detect and Recover Stalled Runs**, **Agent Run**, **Handle Mid-Turn Requests**, **Provision Workspace**, **Remove Workspace for Finished Issue**.
 - Lifecycle: implement every state and transition of the lifecycle.
@@ -2360,7 +2211,7 @@ Generated from the specification graph. Intentionally redundant with the body.
 - Configuration fields: `polling.interval_ms`, `tracker.kind`, `tracker.provider`, `tracker.active_states`, `tracker.terminal_states`, `tracker.required_labels`, `workspace.root`, `agent.max_concurrent_agents`, `agent.max_concurrent_agents_by_state`, `agent.max_turns`, `agent.max_retry_backoff_ms`, `codex.command`, `codex.approval_policy`, `codex.thread_sandbox`, `codex.turn_sandbox_policy`, `codex.turn_timeout_ms`, `codex.read_timeout_ms`, `codex.stall_timeout_ms`, `hooks.after_create`, `hooks.before_run`, `hooks.after_run`, `hooks.before_remove`, `hooks.timeout_ms`, `workflow.prompt_template`.
 - Documentation: record the selected behavior for every implementation-defined area.
 
-### Optional extensions (normative in full when implemented)
+### 18.2 Optional extensions (normative in full when implemented)
 
 - **Execute Provider-Native Agent Tool**
 - **Run Agents on Remote Worker Hosts**
@@ -2380,7 +2231,7 @@ Generated from the specification graph. Intentionally redundant with the body.
 - `server.port`
 - `server.host`
 
-## Conformance
+## 19. Conformance
 
 Implement a conforming realization of this specification. Preserve normative semantics and design intent. Do not infer additional constraints from the reference implementation. Where behavior is implementation-defined, choose a reasonable mechanism that preserves all stated invariants, and document it.
 

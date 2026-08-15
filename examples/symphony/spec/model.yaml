@@ -1,3 +1,24 @@
+overview: >
+  One orchestrator process turns tracker issues into supervised coding-agent
+  runs. The Configuration Authority reads the operator's workflow document and
+  serves validated settings to everyone else. On a polling cadence the
+  Scheduler asks the Tracker Adapter for issues in the active states, claims
+  the ones it may run, and hands each to an Agent Run Supervisor. The
+  supervisor has the Workspace Manager prepare the issue's workspace, then
+  drives a coding agent through the Agent Session Protocol Client, turn by
+  turn, while session events stream back into the Scheduler's claim
+  telemetry. Runs that fail are retried with backoff into the same workspace.
+  Runs that need a human are blocked until the tracker changes. Issues the
+  tracker closes get their workspaces reclaimed. An optional Observability
+  Surface projects all of it for operators.
+
+external_dependencies:
+  - One reachable issue-tracker API with credentials for the configured provider.
+  - A local filesystem for workspaces and logs.
+  - An installed coding-agent runtime launchable by the configured agent command.
+  - Host-environment authentication for the coding-agent runtime itself.
+  - Remote-execution extension only - worker hosts reachable over the configured transport, meeting the same workspace and runtime prerequisites.
+
 concepts:
   - id: concept.workflow-document
     name: Workflow Document
