@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 from collections import defaultdict, deque
-import argparse, sys, yaml
+import argparse, re, sys, yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = ['manifest.yaml','intent.yaml','model.yaml','responsibilities.yaml','interactions.yaml','lifecycle.yaml','interfaces.yaml','invariants.yaml','failures.yaml','implementation-defined.yaml','reference.yaml']
@@ -47,6 +47,30 @@ def sent(v):
 
 def bullets(xs): return [f'- {sent(x)}' for x in xs]
 
+def lab(x, field, default):
+    """The lead-in printed above a record's list.
+
+    A label names what the list holds, not which slot of the record type it came
+    from. `<field>_label` lets the record say so; the type-level default is only
+    the fallback, and a document where every default survives is a document whose
+    labels carry no information.
+    """
+    v = x.get(field + '_label')
+    return f"{' '.join(str(v).split()).rstrip(':')}:" if v else default
+
+# Cross-references are written as a name plus a placeholder, and the section
+# number is substituted once the whole document is numbered. A reference to a
+# record that never got a number loses its parenthetical instead of dangling.
+SECMAP = {}
+SEC_TOKEN = re.compile(r' \(Section \{\{sec:([^}]+)\}\}\)')
+
+def secref(rid): return f' (Section {{{{sec:{rid}}}}})'
+
+def resolve_sections(text):
+    return SEC_TOKEN.sub(lambda m: f' (Section {SECMAP[m.group(1)]})' if m.group(1) in SECMAP else '', text)
+
+def named(rid, idx): return f"**{label(rid, idx)}**{secref(rid)}"
+
 def first_sentence(v):
     s = ' '.join(str(v or '').strip().split())
     for sep in ['. ', '; ', ': ']:
@@ -86,7 +110,9 @@ def subsections(no, parts, level='###'):
 def numbered(records, no, level, render):
     """Number a list of records as `no`.1, `no`.2, ... at `level`."""
     L = []
-    for n, x in enumerate(records, 1): L += render(x, f"{level} {no}.{n}")
+    for n, x in enumerate(records, 1):
+        if isinstance(x.get('id'), str): SECMAP[x['id']] = f"{no}.{n}"
+        L += render(x, f"{level} {no}.{n}")
     return L
 
 def layer_lines(layers):
@@ -124,6 +150,8 @@ def validate(d):
     used_r, used_c, used_i, used_f = set(), set(), set(), set()
     for rel in model.get('relationships', []):
         if rel.get('subject') not in ids or rel.get('object') not in ids: errors.append('model relationship has unknown reference')
+    if d['intent.yaml'].get('design_intents'):
+        errors.append('intent.yaml: design_intents is not a record type. Rationale is written at the grain of what it justifies: a whole-subject boundary belongs in the problem statement, a chapter-level reason in that chapter overview, and a record-level reason in that record intent')
     for n, ly in enumerate(model.get('layers', []), 1):
         if not isinstance(ly, dict) or not isinstance(ly.get('id'), str): errors.append(f'model layer {n}: layer needs an id')
         elif not ly.get('name'): errors.append(f"{ly['id']}: layer needs a name")
@@ -213,6 +241,11 @@ def validate(d):
             stmt = req.get('statement','') if isinstance(req, dict) else ''
             if len(str(stmt).split()) > STYLE_MAX_WORDS:
                 warnings.append(f"{item.get('id')}: style: requirement statement has {len(str(stmt).split())} words; simplify it")
+        for k, v in item.items():
+            if not (isinstance(k, str) and k.endswith('_label')): continue
+            if not isinstance(v, str) or not v.strip(): errors.append(f"{item.get('id')}: {k} must be a non-empty label")
+            elif not item.get(k[:-len('_label')]): errors.append(f"{item.get('id')}: {k} names a list the record does not have")
+            elif len(v.split()) > 6: warnings.append(f"{item.get('id')}: style: {k} has {len(v.split())} words; a label names what the list holds in a few words")
     if not d['manifest.yaml'].get('normative_language'): errors.append('manifest: normative_language is required; the document uses MUST and SHOULD, so their meaning must be defined')
     if not concepts: errors.append('whole-system: at least one concept is required')
     if len(concepts)>1 and not model.get('relationships'): errors.append('whole-system: concepts need relationships')
@@ -264,19 +297,19 @@ def interaction_lines(it, idx, h):
     ps=[label(x,idx) for x in it.get('participants',[])]
     if ps: L += ['Participants: '+', '.join(f'**{x}**' for x in ps)+'.','']
     if it.get('trigger'): L+=[f"Trigger: {sent(it['trigger'])}",'']
-    if it.get('preconditions'): L+=['Preconditions:','']+bullets(it['preconditions'])+['']
+    if it.get('preconditions'): L+=[lab(it,'preconditions','Preconditions:'),'']+bullets(it['preconditions'])+['']
     if it.get('sequence'):
-        L+=['Sequence:','']
+        L+=[lab(it,'sequence','Sequence:'),'']
         for n,s in enumerate(it['sequence'],1): L += [f"{n}. **{label(s.get('actor',''),idx)}** {sent(s.get('action'))}"]
         L+=['']
-    if it.get('postconditions'): L+=['Postconditions:','']+bullets(it['postconditions'])+['']
+    if it.get('postconditions'): L+=[lab(it,'postconditions','Postconditions:'),'']+bullets(it['postconditions'])+['']
     if it.get('requirements'):
-        L+=['Requirements:','']
+        L+=[lab(it,'requirements','Requirements:'),'']
         L+=[f"- **{str(req.get('level','must')).upper().replace('_',' ')}** — {sent(req.get('statement'))}" for req in it['requirements']]+['']
-    if it.get('invariants'): L+=['Constrained by '+', '.join(f"**{label(x,idx)}**" for x in it['invariants'])+'.','']
-    if it.get('failures'): L+=['Failures: '+', '.join(f"**{label(x,idx)}**" for x in it['failures'])+'.','']
+    if it.get('invariants'): L+=['Constrained by '+', '.join(named(x,idx) for x in it['invariants'])+'.','']
+    if it.get('failures'): L+=['Failures: '+', '.join(named(x,idx) for x in it['failures'])+'.','']
     if it.get('algorithm'): L+=['Reference algorithm (non-normative):','','```text']+str(it['algorithm']).rstrip().split('\n')+['```','']
-    if it.get('verification'): L+=['Validation checks:','']+bullets(it['verification'])+['']
+    if it.get('verification'): L+=[lab(it,'verification','Validation checks:'),'']+bullets(it['verification'])+['']
     return L
 
 def lifecycle_lines(life, idx, no, level):
@@ -294,19 +327,41 @@ def lifecycle_lines(life, idx, no, level):
 def interface_lines(x, h):
     L = [f"{h} {x.get('name',x['id'])}{ext_suffix(x)}",'',sent(x.get('purpose')),'']+ext_note(x)
     for title,key in [('Input semantics','input_semantics'),('Output semantics','output_semantics'),('Failure semantics','failure_semantics')]:
-        if x.get(key): L += [f'{title}:','']+bullets(x[key])+['']
-    if x.get('implementation_defined'): L += ['Implementation-defined mechanisms:','']+bullets(x['implementation_defined'])+['']
+        if x.get(key): L += [lab(x,key,f'{title}:'),'']+bullets(x[key])+['']
+    if x.get('implementation_defined'): L += [lab(x,'implementation_defined','Implementation-defined mechanisms:'),'']+bullets(x['implementation_defined'])+['']
     L += example_lines(x)
-    if x.get('verification'): L+=['Validation checks:','']+bullets(x['verification'])+['']
+    if x.get('verification'): L+=[lab(x,'verification','Validation checks:'),'']+bullets(x['verification'])+['']
     return L
 
 def parameter_lines(p, idx):
     L = [f"- `{refkey(p)}` — {sent(p.get('controls'))}"]
     for s in p.get('semantics', []): L.append(f"  - {sent(s)}")
     if p.get('reload'): L.append(f"  - Reload: {sent(p['reload'])}")
-    if p.get('constrains'): L.append('  - Used by ' + ', '.join(f"**{label(x,idx)}**" for x in p['constrains']) + '.')
+    if p.get('constrains'): L.append('  - Used by ' + ', '.join(named(x,idx) for x in p['constrains']) + '.')
     for ln in example_lines(p): L.append(f'  {ln}' if ln else '')
     return L
+
+def configuration_lines(params, reload_default, idx, no, level):
+    """The operator contract: every field, its semantics, and what it governs.
+
+    Rendered wherever the graph puts it — inside the chapter that claims
+    `parameters`, or as a section of its own when no chapter claims it.
+    """
+    L = ['Each field below must exist and be operator-settable. Keys are reference names used by this document, not required spellings. Concrete names, formats, and defaults are implementation-defined unless fixed elsewhere. The stated semantics are normative. One entry per field; sub-bullets give its semantics and the behaviors it governs.','']
+    if reload_default:
+        L += [f"Reload: {sent(reload_default)} A field whose reload behavior differs states its own.",'']
+    pc=[p for p in params if p.get('conformance')!='extension']
+    pe=[p for p in params if p.get('conformance')=='extension']
+    def field_lines(ps, lead=None):
+        def build(h, n):
+            out=list(lead) if lead else []
+            for p in ps: out+=parameter_lines(p,idx)
+            return out+['']
+        return build
+    parts=[]
+    if pc: parts.append(('Core Fields', field_lines(pc)))
+    if pe: parts.append(('Extension Fields', field_lines(pe, ['These fields exist only when their extension is implemented.',''])))
+    return L + subsections(no, parts, level)
 
 def checklist_lines(d, params, sec_no=None):
     def split(xs): return [x for x in xs if x.get('conformance')!='extension'], [x for x in xs if x.get('conformance')=='extension']
@@ -337,17 +392,17 @@ def checklist_lines(d, params, sec_no=None):
 def invariant_lines(x, h):
     L = [f"{h} {x.get('name',x['id'])}",'',sent(x.get('statement')),'']
     if x.get('intent'): L+=[sent(x['intent']),'']
-    if x.get('prevents'): L+=['This prevents:','']+bullets(x['prevents'])+['']
-    if x.get('verification'): L+=['Validation checks:','']+bullets(x['verification'])+['']
+    if x.get('prevents'): L+=[lab(x,'prevents','This prevents:'),'']+bullets(x['prevents'])+['']
+    if x.get('verification'): L+=[lab(x,'verification','Validation checks:'),'']+bullets(x['verification'])+['']
     return L
 
 def failure_lines(x, idx, h):
     L = [f"{h} {x.get('name',x['id'])}{ext_suffix(x)}",'',sent(x.get('meaning')),'']+ext_note(x)
-    if x.get('occurs_during'): L += ['Occurs during '+', '.join(f"**{label(r,idx)}**" for r in x['occurs_during'])+'.','']
+    if x.get('occurs_during'): L += ['Occurs during '+', '.join(named(r,idx) for r in x['occurs_during'])+'.','']
     L += [f"Retryable: {x.get('retryable','unspecified')}.",'']
-    if x.get('required_behavior'): L+=['Requirements:','']+bullets(x['required_behavior'])+['']
+    if x.get('required_behavior'): L+=[lab(x,'required_behavior','Required behavior:'),'']+bullets(x['required_behavior'])+['']
     if x.get('recovery'): L+=[f"Recovery: {sent(x['recovery'])}",'']
-    if x.get('verification'): L+=['Validation checks:','']+bullets(x['verification'])+['']
+    if x.get('verification'): L+=[lab(x,'verification','Validation checks:'),'']+bullets(x['verification'])+['']
     return L
 
 def stance_lines(m):
@@ -360,13 +415,13 @@ def stance_lines(m):
 
 def reading_guide_lines(d, params):
     scan, deep = [], []
-    if params: scan.append('The Configuration Specification lists every operator-settable field.')
+    if params: scan.append('The configuration field list gives every operator-settable field.')
     if any(c.get('attributes') for c in d['model.yaml'].get('concepts', [])): scan.append('Concept field lists give the data contract.')
     if any(x.get('verification') for x in d['interactions.yaml'].get('interactions', []) + d['invariants.yaml'].get('invariants', [])): scan.append('The Test and Validation Matrix lists the checks an implementation must pass.')
     scan.append('The Implementation Checklist is the definition of done.')
     if any(x.get('examples') for x in d['interfaces.yaml'].get('interfaces', []) + d['parameters.yaml'].get('parameters', [])) or any(x.get('algorithm') for x in d['interactions.yaml'].get('interactions', [])):
         scan.append('Examples and reference algorithms show one concrete shape. They are informative, not normative.')
-    deep += ['The Problem Statement and Design Intent say why the subject exists.','The System Overview and Core Domain Model define the participants and who owns each decision.']
+    deep += ['The Problem Statement says why the subject exists and which boundaries it holds to.','The System Overview and Core Domain Model define the participants and who owns each decision.']
     deep.append('The chapters walk through behavior end to end.' if d['chapters.yaml'].get('chapters') else 'The interaction, lifecycle, and interface sections walk through behavior end to end.')
     deep.append('Invariants and failures state what must survive your design choices.')
     L = ['## How to Read This Specification','','This specification serves two implementation styles.','','To implement by transcription, use the scan path:','']
@@ -414,7 +469,9 @@ def verification_matrix_lines(d, idx, sec_no=None):
 def render(d):
     idx,_=make_index(d); m=d['manifest.yaml']['specification']; intent=d['intent.yaml']; model=d['model.yaml']; rs=d['responsibilities.yaml'].get('responsibilities',[]); its=d['interactions.yaml'].get('interactions',[]); life=d['lifecycle.yaml']
     ifaces=d['interfaces.yaml'].get('interfaces',[]); invs=d['invariants.yaml'].get('invariants',[]); fails=d['failures.yaml'].get('failures',[]); chapters=d['chapters.yaml'].get('chapters',[])
-    params=d['parameters.yaml'].get('parameters',[])
+    params=d['parameters.yaml'].get('parameters',[]); reload_default=d['parameters.yaml'].get('reload_default')
+    SECMAP.clear()
+    claimed={ref for ch in chapters for ref in ch.get('contains',[])}
     L=[f"# {m['name']} Specification",'',"> GENERATED FROM `spec/`. DO NOT EDIT DIRECTLY.",'',f"Status: {m.get('status','draft')}  ",f"Version: {m.get('version','0.1.0')}",'']
     L+=stance_lines(m)
     L+=['---','']
@@ -436,9 +493,9 @@ def render(d):
     def one_component(r, h):
         who=r.get('name',r['id'])
         out=[f"{h} {who}{ext_suffix(r)}",'',sent(r.get('purpose')),'']
-        if r.get('owns'): out+=[f'{who} owns:','']+bullets(r['owns'])+['']
-        if r.get('must_not_own'): out+=[f'{who} does not own:','']+bullets(r['must_not_own'])+['']
-        if r.get('normative'): out+=['Requirements:','']+bullets(r['normative'])+['']
+        if r.get('owns'): out+=[lab(r,'owns',f'{who} owns:'),'']+bullets(r['owns'])+['']
+        if r.get('must_not_own'): out+=[lab(r,'must_not_own',f'{who} does not own:'),'']+bullets(r['must_not_own'])+['']
+        if r.get('normative'): out+=[lab(r,'normative','Ownership requirements:'),'']+bullets(r['normative'])+['']
         return out
     def one_entity(c, h):
         return [f"{h} {c.get('name',c['id'])}{ext_suffix(c)}",'',sent(c.get('meaning')),'']+attribute_lines(c)+bullets(c.get('properties',[]))+['']
@@ -464,28 +521,8 @@ def render(d):
     parts=[('Entities', entity_lines)]
     if model.get('relationships'): parts.append(('Relationships', relationship_lines))
     L+=subsections(sec[0], parts)
-    if intent.get('design_intents'):
-        def one_intent(x, h):
-            out=[f"{h} {x.get('name','Intent')}",'',sent(x.get('intent')),'']
-            if x.get('why_it_matters'): out+=[sent(x['why_it_matters']),'']
-            if x.get('implications'): out+=['Implications:','']+bullets(x['implications'])+['']
-            if x.get('tradeoffs'): out+=['Notes:','']+bullets(x['tradeoffs'])+['']
-            return out
-        L+=h2('Design Intent')+numbered(intent['design_intents'],sec[0],'###',one_intent)
-    if params:
-        L+=h2('Configuration Specification')+['Each field below must exist and be operator-settable. Keys are reference names used by this document, not required spellings. Concrete names, formats, and defaults are implementation-defined unless fixed elsewhere. The stated semantics are normative. One entry per field; sub-bullets give its semantics, reload behavior, and the behaviors it governs.','']
-        pc=[p for p in params if p.get('conformance')!='extension']
-        pe=[p for p in params if p.get('conformance')=='extension']
-        def field_lines(ps, lead=None):
-            def build(h, no):
-                out=list(lead) if lead else []
-                for p in ps: out+=parameter_lines(p,idx)
-                return out+['']
-            return build
-        parts=[]
-        if pc: parts.append(('Core Fields', field_lines(pc)))
-        if pe: parts.append(('Extension Fields', field_lines(pe, ['These fields exist only when their extension is implemented.',''])))
-        L+=subsections(sec[0], parts)
+    if params and 'parameters' not in claimed:
+        L+=h2('Configuration Specification')+configuration_lines(params,reload_default,idx,sec[0],'###')
     iids={x['id'] for x in its}; vids={x['id'] for x in invs}; fids={x['id'] for x in fails}; xids={x['id'] for x in ifaces}
     if chapters:
         assigned=set(); life_claimed=False
@@ -499,10 +536,12 @@ def render(d):
                 if ref=='lifecycle':
                     life_claimed=True
                     L+=[f'{h} Lifecycle and State','']+lifecycle_lines(life,idx,no,'####')
-                elif ref in iids: L+=interaction_lines(idx[ref],idx,h); assigned.add(ref)
-                elif ref in vids: L+=invariant_lines(idx[ref],h); assigned.add(ref)
-                elif ref in fids: L+=failure_lines(idx[ref],idx,h); assigned.add(ref)
-                elif ref in xids: L+=interface_lines(idx[ref],h); assigned.add(ref)
+                elif ref=='parameters':
+                    L+=[f'{h} Configuration Fields','']+configuration_lines(params,reload_default,idx,no,'####')
+                elif ref in iids: SECMAP[ref]=no; L+=interaction_lines(idx[ref],idx,h); assigned.add(ref)
+                elif ref in vids: SECMAP[ref]=no; L+=invariant_lines(idx[ref],h); assigned.add(ref)
+                elif ref in fids: SECMAP[ref]=no; L+=failure_lines(idx[ref],idx,h); assigned.add(ref)
+                elif ref in xids: SECMAP[ref]=no; L+=interface_lines(idx[ref],h); assigned.add(ref)
                 else: sub-=1
         if not life_claimed:
             L+=h2('Lifecycle and State')+lifecycle_lines(life,idx,sec[0],'###')
@@ -510,7 +549,7 @@ def render(d):
         if rest:
             L+=['## Appendix A. Records Outside Chapters','','The following records are normative but are not assigned to any chapter.','']
             for n,x in enumerate(rest,1):
-                h=f"### A.{n}"
+                h=f"### A.{n}"; SECMAP[x['id']]=f"A.{n}"
                 if x['id'] in iids: L+=interaction_lines(x,idx,h)
                 elif x['id'] in xids: L+=interface_lines(x,h)
                 elif x['id'] in vids: L+=invariant_lines(x,h)
@@ -525,8 +564,8 @@ def render(d):
     if areas:
         def one_area(x, h):
             out=[f"{h} {x.get('name','Area')}",'',sent(x.get('freedom')),'']
-            if x.get('fixed_semantics'): out+=['Fixed semantics:','']+bullets(x['fixed_semantics'])+['']
-            if x.get('document'): out+=['A conforming implementation must document:','']+bullets(x['document'])+['']
+            if x.get('fixed_semantics'): out+=[lab(x,'fixed_semantics','Fixed semantics:'),'']+bullets(x['fixed_semantics'])+['']
+            if x.get('document'): out+=[lab(x,'document','A conforming implementation must document:'),'']+bullets(x['document'])+['']
             return out
         L+=h2('Implementation-Defined Areas')+numbered(areas,sec[0],'###',one_area)
     ref=d['reference.yaml'].get('reference_implementation',{})
@@ -541,7 +580,7 @@ def render(d):
     if params: conf.insert(4,'exposes every field in the configuration specification with its stated semantics')
     if any(x.get('conformance')=='extension' for x in all_records(d)): conf.append('may omit optional extensions entirely; every implemented extension is normative in full')
     L+=h2('Conformance')+[sent(d['manifest.yaml'].get('implementation_instruction')),'','A conforming implementation:','']+bullets(conf)+['']
-    return '\n'.join(L).rstrip()+'\n'
+    return resolve_sections('\n'.join(L).rstrip())+'\n'
 
 def main():
     p=argparse.ArgumentParser()

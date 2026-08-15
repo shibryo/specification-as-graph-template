@@ -23,9 +23,16 @@ render:
       reference algorithms, and neither reshuffles the body.
     strategy: >
       Project declared chapters in order between the System Model and the
-      implementation-freedom sections. Each chapter renders its overview
-      followed by its contained interactions, interfaces, lifecycle,
-      invariants, and failures in the declared reading order.
+      implementation-freedom sections. Each chapter opens with the design intent
+      it claims and its overview, then renders its contained interactions,
+      interfaces, lifecycle, configuration fields, invariants, and failures in
+      the declared reading order.
+    claim_tokens: >
+      A chapter's `contains:` may name, at most once each across the document,
+      the token `lifecycle` or the token `parameters`. These are how the subject
+      positions the state machine and the operator contract by its own
+      decomposition rather than by record type. An unclaimed lifecycle or field
+      list falls back to a section of its own.
     fallback: Type-ordered sections are used when no chapters are declared.
     unassigned: Records assigned to no chapter render in a final appendix.
   extensions:
@@ -44,6 +51,13 @@ render:
     Statement; Goals and Non-Goals; System Overview; Core Domain Model) is
     fixed so every specification generated from this template opens the same
     way; everything after it is positioned by the subject's own decomposition.
+  cross_references: >
+    A rendered cross-reference carries the referenced record's section number,
+    resolved after the whole document is numbered. A reference to a record that
+    receives no number loses its parenthetical rather than dangling. Section
+    numbers make a link followable; they do not make a scattered document
+    connected, and a rising count of cross-reference lines is a sign that
+    related facts are not adjacent.
   sections:
     - title: Normative Language
       strategy: project_normative_language
@@ -55,10 +69,12 @@ render:
       strategy: assemble_overview_components_layers_and_dependencies
     - title: Core Domain Model
       strategy: assemble_entities_and_relationships
-    - title: Design Intent
-      strategy: explain_intent
+    # Design Intent was a section here. It is gone: see `rationale` below.
     - title: Configuration Specification
       strategy: explain_parameters
+      positioned_by: >
+        The chapter that claims `parameters`. Absent a claim, this fixed
+        position, ahead of the chapters.
     - title: Core Interactions
       strategy: narrative_interactions
     - title: Lifecycle and State
@@ -85,12 +101,33 @@ render:
       checklist are deliberately redundant with the body, in the style of
       implementation-facing specifications. Because they are projections of
       the same records, they cannot drift from the body.
+  rationale:
+    note: >
+      There is no design-intent section and no design-intent record. Rationale
+      renders wherever the thing it justifies renders: whole-subject boundaries
+      in the Problem Statement prose, a chapter's reason in that chapter's
+      overview, and a record's reason in the record itself — `intent:` on an
+      invariant, or a sentence of its own prose.
+    why_not_a_record: >
+      A rationale record references nothing and is referenced by nothing, so the
+      only placement available to it is a section that collects every one of
+      them. It also pre-announces the invariants: the reader is given a fact as
+      rationale and then the same fact one section later as the statement they
+      are checked against. Every reason worth printing has an owner already.
   vocabulary:
     note: >
       Rendered labels reuse the lexicon of hand-written implementation-facing
-      specifications (Fields, Failure semantics, Implications, Validation
-      checks, Definition of Done). Do not invent editorial labels
-      absent from that genre, such as "Why it matters".
+      specifications (Fields, Failure semantics, Validation checks, Definition
+      of Done). Do not invent editorial labels absent from that genre, such as
+      "Why it matters".
+    labels_name_the_list: >
+      A list's label names what that list holds, not which slot of the record
+      type it came from. Any record may set `<field>_label` and the type-level
+      default is only a fallback. A document whose labels are all defaults
+      prints the same handful of words dozens of times, and a reader who can
+      predict every label after the third record of a kind starts skimming.
+      Reuse across a document is the measure: near 1x is a document that names
+      its content, and a high reuse ratio is a defect whatever the label says.
   informative_aids:
     note: >
       Concept field lists render typed per-field facts; interface/parameter

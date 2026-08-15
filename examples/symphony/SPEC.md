@@ -27,7 +27,7 @@ This specification serves two implementation styles.
 
 To implement by transcription, use the scan path:
 
-- The Configuration Specification lists every operator-settable field.
+- The configuration field list gives every operator-settable field.
 - Concept field lists give the data contract.
 - The Test and Validation Matrix lists the checks an implementation must pass.
 - The Implementation Checklist is the definition of done.
@@ -35,7 +35,7 @@ To implement by transcription, use the scan path:
 
 To implement by reconstruction, read in order:
 
-- The Problem Statement and Design Intent say why the subject exists.
+- The Problem Statement says why the subject exists and which boundaries it holds to.
 - The System Overview and Core Domain Model define the participants and who owns each decision.
 - The chapters walk through behavior end to end.
 - Invariants and failures state what must survive your design choices.
@@ -109,7 +109,7 @@ Work Scheduler does not own:
 - Provider-specific query, identity, or capability details.
 - Rendering the operator-facing view of runtime state.
 
-Requirements:
+Ownership requirements:
 
 - Exactly one scheduler authority MUST own the claim set.
 - The scheduler MUST NOT dispatch a Work Item it already claims.
@@ -136,7 +136,7 @@ Agent Run Supervisor does not own:
 - Choosing which Work Item to run.
 - Choosing the execution location for its own retry.
 
-Requirements:
+Ownership requirements:
 
 - A supervisor MUST run exactly one Work Item at a time.
 - A supervisor MUST end its Agent Session when its run ends.
@@ -159,7 +159,7 @@ Workspace Manager does not own:
 - Any decision about which items are worked on.
 - The content the agent produces inside a workspace.
 
-Requirements:
+Ownership requirements:
 
 - A workspace path that resolves outside the configured root MUST be refused.
 - The configured workspace root itself MUST NOT be used as a workspace.
@@ -182,7 +182,7 @@ Configuration Store does not own:
 - Interpreting settings as scheduling decisions.
 - Deciding what to do when a setting changes mid-run.
 
-Requirements:
+Ownership requirements:
 
 - An invalid Workflow Definition MUST NOT become effective.
 - The subject MUST NOT start when no valid definition is available.
@@ -207,7 +207,7 @@ Work Source Adapter does not own:
 - Claim, concurrency, retry, or ordering policy.
 - Writing back to the Work Source on the scheduler's behalf.
 
-Requirements:
+Ownership requirements:
 
 - The adapter MUST expose reads by state and reads by item identity.
 - The adapter MUST drop provider records that lack a required Work Item field.
@@ -232,7 +232,7 @@ Agent Session Client does not own:
 - Retry, backoff, or claim decisions.
 - Deciding whether another Turn should follow.
 
-Requirements:
+Ownership requirements:
 
 - The session MUST start with the run's Workspace as its working directory.
 - The client MUST NOT pass configured credential variables to the agent process.
@@ -254,7 +254,7 @@ Runtime State Publisher does not own:
 - Any scheduling decision.
 - Being the durable record of what happened.
 
-Requirements:
+Ownership requirements:
 
 - Runtime State MUST distinguish running, retrying, and blocked items.
 - A blocked or retrying item MUST be reported with the reason.
@@ -419,90 +419,11 @@ A capability the Work Source adapter offers to the agent so the agent can act on
 
 **Agent Session** may invoke **Provider-Native Agent Tool**. A session may call a provider-native tool. The subject executes the call and returns the result to the agent.
 
-## 5. Design Intent
+## 5. Configuration Specification
 
-### 5.1 The work source is authoritative
+Each field below must exist and be operator-settable. Keys are reference names used by this document, not required spellings. Concrete names, formats, and defaults are implementation-defined unless fixed elsewhere. The stated semantics are normative. One entry per field; sub-bullets give its semantics and the behaviors it governs.
 
-The tracker decides whether a work item still deserves an agent. The subject re-reads the item before acting instead of trusting its own memory.
-
-Board state changes while a run is in flight. Humans close items, reassign them, and strip labels. An orchestrator that trusts its own cache keeps burning agent time on work nobody wants any more.
-
-Implications:
-
-- Dispatch decisions are revalidated against a fresh read immediately before dispatch.
-- Claimed items are re-read every cycle and released when they stop qualifying.
-- Local runtime state is a cache of tracker state, never a substitute for it.
-
-Notes:
-
-- The subject reads the work source more often than a cache-first design would.
-
-### 5.2 One claim, one workspace, one run
-
-A work item under orchestration is owned by exactly one claim. That claim owns one workspace and at most one active agent run.
-
-Two agents on one item duplicate work and fight over the same branch. Two runs in one directory corrupt each other's checkout.
-
-Implications:
-
-- Claim, workspace identity, and run are all keyed by the same work item.
-- A second dispatch of a claimed item is refused rather than queued.
-
-### 5.3 Blocked is not failed
-
-A run that stops because it needs operator input is held and surfaced. It is not retried and not released.
-
-Retrying a run that is waiting for a human wastes capacity and hides the request. The operator never learns that a decision is pending.
-
-Implications:
-
-- Requests for input, approval, or elicitation move the item to a blocked state.
-- A blocked item keeps its claim so nothing else picks the item up.
-- Blocked items are visible in the runtime state with the reason they blocked.
-
-### 5.4 Fail into a retry, not into a stop
-
-Every failure that is not a request for human input results in a scheduled retry with growing delay, until the work item stops qualifying.
-
-Trackers, networks, and agent runtimes fail transiently. An orchestrator that stops on first failure needs an operator to restart it.
-
-Implications:
-
-- Failure paths schedule a retry rather than releasing the claim.
-- Repeated failure backs off instead of hammering the failing dependency.
-- The claim is released only when the work item itself stops qualifying.
-
-### 5.5 Contain the agent
-
-The agent runs inside a workspace that belongs to its work item and receives no credential that the orchestrator uses to read the board.
-
-An autonomous agent with a writable path outside its workspace can damage the source repository. An agent holding the orchestrator's tracker token can act on the board outside the orchestrator's policy.
-
-Implications:
-
-- The workspace path is verified to resolve inside the configured root.
-- Credential-bearing environment variables are removed before the agent starts.
-
-Notes:
-
-- Agents that legitimately need tracker access must be granted it explicitly.
-
-### 5.6 Providers are adapters, not policy
-
-Scheduling policy is expressed over a normalized work item. Provider-specific reads, identifiers, and capabilities stay behind an adapter boundary.
-
-Scheduling rules that are written against one tracker's fields cannot be reused, and every new provider reopens the scheduler.
-
-Implications:
-
-- The scheduler depends only on normalized read operations.
-- Provider-native capabilities are offered to the agent, not to the scheduler.
-
-## 6. Configuration Specification
-
-Each field below must exist and be operator-settable. Keys are reference names used by this document, not required spellings. Concrete names, formats, and defaults are implementation-defined unless fixed elsewhere. The stated semantics are normative. One entry per field; sub-bullets give its semantics, reload behavior, and the behaviors it governs.
-
-### 6.1 Core Fields
+### 5.1 Core Fields
 
 - `work-source.selection` — Which Work Source is read and which collection of work is in scope.
   - Exactly one work source is effective at a time.
@@ -510,27 +431,27 @@ Each field below must exist and be operator-settable. Keys are reference names u
   - The subject does not start when the selection is absent or unsupported.
   - Provider-specific settings belong to the selected source, not to the scheduler.
   - Reload: A change takes effect from the next poll cycle. Runs already started are unaffected until they are reconciled.
-  - Used by **Poll and Dispatch**, **Reconcile Claimed Work Items**, **Work Source Adapter Interface**.
+  - Used by **Poll and Dispatch** (Section 6.1), **Reconcile Claimed Work Items** (Section 9.2), **Work Source Adapter Interface** (Section 6.2).
 - `work-source.credential` — The secret the subject presents when reading the Work Source and executing provider-native tools.
   - The credential may be supplied indirectly through the environment.
   - Every environment name that carries it is declared so it can be withheld from the agent.
   - An absent credential is a configuration failure, not a read failure.
   - Reload: A change takes effect on the next read. Sessions keep the credential bound when they started.
-  - Used by **Poll and Dispatch**, **Run the Agent Session**, **The Agent Never Receives the Subject's Credentials**.
+  - Used by **Poll and Dispatch** (Section 6.1), **Run the Agent Session** (Section 8.1), **The Agent Never Receives the Subject's Credentials** (Section 8.5).
 - `scheduling.active-states` — Which board states make a Work Item eligible for an Agent Run.
   - Only items in an active state are selected for dispatch.
   - A claimed item that leaves the active states is released.
   - A run whose item leaves the active states stops starting further turns.
   - Matching ignores case and surrounding whitespace.
   - Reload: A change takes effect from the next poll cycle and applies to existing claims at the next reconciliation.
-  - Used by **Poll and Dispatch**, **Reconcile Claimed Work Items**, **Continue or Conclude the Run**.
+  - Used by **Poll and Dispatch** (Section 6.1), **Reconcile Claimed Work Items** (Section 9.2), **Continue or Conclude the Run** (Section 8.2).
 - `scheduling.terminal-states` — Which board states mean the work is over and its workspace may be reclaimed.
   - An item in a terminal state is never dispatched.
   - A claimed item reaching a terminal state has its run stopped and workspace removed.
   - Terminal is stronger than non-active: only terminal removes the workspace.
   - Items already terminal at startup have their workspaces reclaimed.
   - Reload: A change takes effect from the next poll cycle.
-  - Used by **Reconcile Claimed Work Items**, **Release the Claim and Clean Up**, **Poll and Dispatch**.
+  - Used by **Reconcile Claimed Work Items** (Section 9.2), **Release the Claim and Clean Up** (Section 9.6), **Poll and Dispatch** (Section 6.1).
 - `scheduling.required-labels` — Which labels a Work Item must carry before this deployment will work on it.
   - An item must carry every configured label to be dispatched.
   - An item that loses a required label has its run stopped and its claim released.
@@ -538,54 +459,54 @@ Each field below must exist and be operator-settable. Keys are reference names u
   - An empty list imposes no label requirement.
   - A blank configured label matches no item.
   - Reload: A change takes effect from the next poll cycle and applies to existing claims at the next reconciliation.
-  - Used by **Poll and Dispatch**, **Reconcile Claimed Work Items**, **A Claim Lives Only While Its Item Qualifies**.
+  - Used by **Poll and Dispatch** (Section 6.1), **Reconcile Claimed Work Items** (Section 9.2), **A Claim Lives Only While Its Item Qualifies** (Section 9.7).
 - `scheduling.poll-interval` — How long the scheduler waits between poll cycles.
   - It bounds how quickly new work is noticed.
   - It bounds how quickly a claim reacts to a board change.
   - An operator may request an earlier cycle without changing the interval.
   - The value must be positive.
   - Reload: A change takes effect when the next cycle is scheduled.
-  - Used by **Poll and Dispatch**, **Reconcile Claimed Work Items**.
+  - Used by **Poll and Dispatch** (Section 6.1), **Reconcile Claimed Work Items** (Section 9.2).
 - `capacity.max-concurrent-runs` — How many Agent Runs may be active at once across the whole deployment.
   - Dispatch stops when the limit is reached and resumes when a run ends.
   - Items deferred by the limit stay eligible for a later cycle.
   - A retry is subject to the same limit as a first dispatch.
   - The value must be positive.
   - Reload: A change takes effect from the next dispatch decision. Runs already active are not stopped to satisfy a lowered limit.
-  - Used by **Poll and Dispatch**, **Concurrency Limits Are Never Exceeded**.
+  - Used by **Poll and Dispatch** (Section 6.1), **Concurrency Limits Are Never Exceeded** (Section 6.5).
 - `capacity.max-concurrent-runs-by-state` — How many Agent Runs may be active at once for Work Items in a given board state.
   - A state without an entry falls back to the global limit.
   - Both the per-state limit and the global limit must permit a dispatch.
   - State names are matched case-insensitively after trimming.
   - Each configured limit must be a positive integer.
   - Reload: A change takes effect from the next dispatch decision.
-  - Used by **Poll and Dispatch**, **Concurrency Limits Are Never Exceeded**.
+  - Used by **Poll and Dispatch** (Section 6.1), **Concurrency Limits Are Never Exceeded** (Section 6.5).
 - `capacity.max-turns-per-run` — How many Turns one Agent Run may start while its Work Item stays active.
   - The run ends when the budget is exhausted, even if the item is still active.
   - Ending on an exhausted budget returns control to the scheduler with the claim held.
   - The value must be positive.
   - Reload: A change takes effect for runs that start afterwards.
-  - Used by **Continue or Conclude the Run**, **One Run's Turns Are Bounded**.
+  - Used by **Continue or Conclude the Run** (Section 8.2), **One Run's Turns Are Bounded** (Section 8.6).
 - `recovery.max-retry-delay` — The ceiling on the growing delay between attempts for one Claim.
   - The delay grows with consecutive failures and never exceeds this ceiling.
   - The ceiling bounds how long recovery can take after a transient failure.
   - The value must be positive.
   - Reload: A change takes effect when the next retry is scheduled.
-  - Used by **Retry After Failure**, **Retry Delay Grows and Is Capped**.
+  - Used by **Retry After Failure** (Section 9.3), **Retry Delay Grows and Is Capped** (Section 9.8).
 - `recovery.stall-timeout` — How long a run may go without observable agent activity before it is restarted.
   - Silence is measured from the last observed agent activity.
   - A run with no activity yet is measured from when it started.
   - A run awaiting operator input is blocked rather than restarted.
   - A value of zero disables stall detection entirely.
   - Reload: A change takes effect at the next poll cycle.
-  - Used by **Detect and Recover a Stalled Run**, **Run Stalled**.
+  - Used by **Detect and Recover a Stalled Run** (Section 9.4), **Run Stalled** (Section 9.10).
 - `workspace.root` — The directory beneath which every Workspace must live.
   - Every workspace path is verified to resolve inside this root.
   - The root itself is never used as a workspace and never removed.
   - A relative value resolves against the Workflow Definition's own location.
   - The value may be supplied indirectly through the environment.
   - Reload: A change takes effect for workspaces prepared afterwards. Existing workspaces are not moved.
-  - Used by **Prepare the Isolated Workspace**, **Workspaces Stay Inside the Configured Root**.
+  - Used by **Prepare the Isolated Workspace** (Section 7.1), **Workspaces Stay Inside the Configured Root** (Section 7.3).
 - `workspace.hooks` — Operator-supplied commands run at workspace creation, before a run, after a run, and before removal.
   - Each hook runs with the Workspace as its working directory.
   - The creation hook runs only on the run that created the directory.
@@ -593,59 +514,59 @@ Each field below must exist and be operator-settable. Keys are reference names u
   - Post-run and removal hook failures are advisory.
   - Every hook is bounded by the hook timeout.
   - Reload: A change takes effect at the next hook invocation.
-  - Used by **Prepare the Isolated Workspace**, **Release the Claim and Clean Up**, **Workspace Hook Interface**.
+  - Used by **Prepare the Isolated Workspace** (Section 7.1), **Release the Claim and Clean Up** (Section 9.6), **Workspace Hook Interface** (Section 7.2).
 - `workspace.hook-timeout` — How long any single hook may run before it is abandoned.
   - A hook exceeding the timeout is abandoned and treated as failed.
   - The timeout applies to every hook, local or remote.
   - The value must be positive.
   - Reload: A change takes effect at the next hook invocation.
-  - Used by **Workspace Hook Interface**, **Workspace Hook Failed**.
+  - Used by **Workspace Hook Interface** (Section 7.2), **Workspace Hook Failed** (Section 7.6).
 - `agent.command` — Which agent runtime is launched for an Agent Session and how it is invoked.
   - The runtime is launched with the run's Workspace as its working directory.
   - The value must be present and non-blank.
   - The launched runtime must speak the session protocol the subject expects.
   - Reload: A change takes effect for sessions started afterwards.
-  - Used by **Run the Agent Session**, **Agent Session Interface**.
+  - Used by **Run the Agent Session** (Section 8.1), **Agent Session Interface** (Section 8.3).
 - `agent.prompt-template` — What the agent is told about the Work Item at the start of a run.
   - The template may reference Work Item fields and the attempt number.
   - An empty template selects a built-in default.
   - A template that cannot be parsed fails the run.
   - A continuation turn's instruction is not drawn from this template.
   - Reload: A change takes effect for prompts rendered afterwards.
-  - Used by **Work Prompt Interface**, **Run the Agent Session**.
+  - Used by **Work Prompt Interface** (Section 8.4), **Run the Agent Session** (Section 8.1).
 - `agent.approval-policy` — Which agent requests the subject may answer on the operator's behalf.
   - A restrictive policy causes an unanswerable request to block the item.
   - A permissive policy lets the subject answer approvals and continue the turn.
   - The default is restrictive, so unattended approval is opt-in.
   - Reload: A change takes effect for sessions started afterwards.
-  - Used by **Run the Agent Session**, **Hold a Work Item Blocked on Operator Input**.
+  - Used by **Run the Agent Session** (Section 8.1), **Hold a Work Item Blocked on Operator Input** (Section 9.5).
 - `agent.sandbox-policy` — What the agent may read, write, and reach while a Turn runs.
   - The default confines writes to the run's Workspace.
   - Network access is off by default and enabled deliberately.
   - An explicitly configured policy is passed to the runtime unchanged.
   - A policy that permits writes outside the Workspace violates containment.
   - Reload: A change takes effect for sessions started afterwards.
-  - Used by **Run the Agent Session**, **Workspaces Stay Inside the Configured Root**.
+  - Used by **Run the Agent Session** (Section 8.1), **Workspaces Stay Inside the Configured Root** (Section 7.3).
 - `agent.turn-silence-timeout` — How long one Turn may go without any agent message before it is abandoned.
   - Each agent message resets the interval.
   - The timeout is not a cap on the total length of a Turn.
   - The value must be positive.
   - Reload: A change takes effect for turns started afterwards.
-  - Used by **Agent Session Interface**, **Turn Failed**.
+  - Used by **Agent Session Interface** (Section 8.3), **Turn Failed** (Section 8.8).
 - `agent.startup-response-timeout` — How long the subject waits for the agent runtime to answer a startup exchange.
   - Exceeding it fails the session start rather than the whole subject.
   - It is distinct from the timeout that governs turn silence.
   - The value must be positive.
   - Reload: A change takes effect for sessions started afterwards.
-  - Used by **Run the Agent Session**, **Agent Session Could Not Start**.
+  - Used by **Run the Agent Session** (Section 8.1), **Agent Session Could Not Start** (Section 8.7).
 - `observability.exposure` — Whether and how the Runtime State is presented to operators.
   - Runtime State is always derivable, whatever presentation is configured.
   - Presentation cadence is operator-settable.
   - Presentation must not delay scheduling.
   - Reload: A change takes effect at the next presentation cycle.
-  - Used by **Publish Runtime State**, **Runtime State Interface**.
+  - Used by **Publish Runtime State** (Section 11.1), **Runtime State Interface** (Section 11.2).
 
-### 6.2 Extension Fields
+### 5.2 Extension Fields
 
 These fields exist only when their extension is implemented.
 
@@ -655,26 +576,26 @@ These fields exist only when their extension is implemented.
   - A run stays on the location chosen for it.
   - The workspace root is interpreted on the chosen location.
   - Reload: A change takes effect for runs dispatched afterwards. Running runs stay where they are.
-  - Used by **Run on a Remote Worker Host**, **A Run Stays on One Execution Location**.
+  - Used by **Run on a Remote Worker Host** (Section 12.1), **A Run Stays on One Execution Location** (Section 12.2).
 - `workers.max-runs-per-host` — How many Agent Runs one execution location may carry at once.
   - Dispatch is deferred when every configured location is at its share.
   - The global limit still applies on top of the per-location share.
   - An absent value imposes no per-location share.
   - A configured value must be positive.
   - Reload: A change takes effect from the next dispatch decision.
-  - Used by **Run on a Remote Worker Host**, **Concurrency Limits Are Never Exceeded**.
+  - Used by **Run on a Remote Worker Host** (Section 12.1), **Concurrency Limits Are Never Exceeded** (Section 6.5).
 - `observability.service-endpoint` — Whether the Runtime State is served over a network, and where it listens.
   - The service does not run unless an endpoint is configured.
   - The bind address defaults to a loopback address.
   - Enabling the service changes no scheduling behavior.
   - Reload: A change takes effect when the service is next started.
-  - Used by **Observability Service Interface**, **Publish Runtime State**.
+  - Used by **Observability Service Interface** (Section 11.3), **Publish Runtime State** (Section 11.1).
 
-## 7. Work Intake and Dispatch
+## 6. Work Intake and Dispatch
 
-How the board becomes running agents. This chapter defines what makes a Work Item a candidate, in what order candidates are taken, what stops a dispatch, and the read boundary every one of those decisions goes through.
+How the board becomes running agents. This chapter defines what makes a Work Item a candidate, in what order candidates are taken, what stops a dispatch, and the read boundary every one of those decisions goes through. Every rule here is expressed over a normalized Work Item, because scheduling rules written against one tracker's fields cannot be reused and every new provider would otherwise reopen the scheduler. The board stays authoritative throughout, at the price of reading the Work Source more often than a cache-first design would.
 
-### 7.1 Poll and Dispatch
+### 6.1 Poll and Dispatch
 
 Turn the current contents of the Work Source into new Agent Runs, without exceeding any limit and without ever starting a second run for one item.
 
@@ -715,9 +636,9 @@ Requirements:
 - **SHOULD** — Treat a provider readiness signal as necessary, never as sufficient.
 - **MUST** — Continue polling after a read failure rather than stopping.
 
-Constrained by **One Claim Per Work Item**, **Dispatch Order Is Deterministic**, **Concurrency Limits Are Never Exceeded**, **Dispatch Decisions Are Revalidated**.
+Constrained by **One Claim Per Work Item** (Section 6.3), **Dispatch Order Is Deterministic** (Section 6.4), **Concurrency Limits Are Never Exceeded** (Section 6.5), **Dispatch Decisions Are Revalidated** (Section 6.6).
 
-Failures: **Work Source Unavailable**.
+Failures: **Work Source Unavailable** (Section 6.7).
 
 Reference algorithm (non-normative):
 
@@ -743,7 +664,7 @@ Validation checks:
 - Remove a required label between read and dispatch, then verify no run starts.
 - Present items with mixed priority and creation time, then verify dispatch order.
 
-### 7.2 Work Source Adapter Interface
+### 6.2 Work Source Adapter Interface
 
 The only boundary through which the scheduler learns about work. It hides every provider-specific query, identifier, and capability.
 
@@ -799,7 +720,7 @@ Validation checks:
 - Fail a read and verify a failure, not an empty list, reaches the scheduler.
 - Rename a state's letter case and verify matching still succeeds.
 
-### 7.3 One Claim Per Work Item
+### 6.3 One Claim Per Work Item
 
 At most one Claim exists for a Work Item at any time, and a claimed item has at most one active Agent Run.
 
@@ -817,7 +738,7 @@ Validation checks:
 - Trigger a retry while the run is active and verify the run is not duplicated.
 - Verify a blocked item is never selected while its claim is held.
 
-### 7.4 Dispatch Order Is Deterministic
+### 6.4 Dispatch Order Is Deterministic
 
 Candidates are dispatched in a total order derived from priority, then age, then identifier, so equal capacity always yields the same selection.
 
@@ -835,7 +756,7 @@ Validation checks:
 - Offer items with equal priority and age and verify identifier order decides.
 - Offer an item with no priority and verify it sorts after every prioritized item.
 
-### 7.5 Concurrency Limits Are Never Exceeded
+### 6.5 Concurrency Limits Are Never Exceeded
 
 The number of active Agent Runs never exceeds the configured limit overall, the configured limit for the item's board state, or the configured limit per execution location.
 
@@ -854,7 +775,7 @@ Validation checks:
 - Fill one host's share and verify dispatch moves to another host or defers.
 - Reach capacity at retry time and verify a further retry is scheduled instead.
 
-### 7.6 Dispatch Decisions Are Revalidated
+### 6.6 Dispatch Decisions Are Revalidated
 
 A Work Item is re-read from the Work Source immediately before an Agent Run starts, and the run does not start if it no longer qualifies.
 
@@ -872,15 +793,15 @@ Validation checks:
 - Remove a required label between poll and dispatch, then verify no run starts.
 - Hide the item between poll and dispatch, then verify the claim is released.
 
-### 7.7 Work Source Unavailable
+### 6.7 Work Source Unavailable
 
 A read of the Work Source did not produce an answer. The subject learns nothing new about which items qualify.
 
-Occurs during **Poll and Dispatch**, **Reconcile Claimed Work Items**, **Retry After Failure**, **Publish Runtime State**.
+Occurs during **Poll and Dispatch** (Section 6.1), **Reconcile Claimed Work Items** (Section 9.2), **Retry After Failure** (Section 9.3), **Publish Runtime State** (Section 11.1).
 
 Retryable: True.
 
-Requirements:
+Required behavior:
 
 - Treat the read as unknown, never as an empty board.
 - Keep every existing Claim, run, and blocked record.
@@ -896,11 +817,11 @@ Validation checks:
 - Fail the reconciling read and verify every claim survives.
 - Fail the read during a retry and verify a further retry is scheduled.
 
-## 8. Isolated Execution Environment
+## 7. Isolated Execution Environment
 
 Where a run happens and what keeps it contained. This chapter defines workspace identity, the containment rule the whole subject depends on, and the operator's hooks into the workspace lifecycle.
 
-### 8.1 Prepare the Isolated Workspace
+### 7.1 Prepare the Isolated Workspace
 
 Give an Agent Run a working directory that belongs to its Work Item, is proven to be inside the configured root, and is bootstrapped on first creation.
 
@@ -940,9 +861,9 @@ Requirements:
 - **MUST** — Bound every hook by the configured hook timeout.
 - **SHOULD** — Truncate hook output before logging it.
 
-Constrained by **Workspaces Stay Inside the Configured Root**, **Workspace Identity Is Deterministic and Collision-Free**.
+Constrained by **Workspaces Stay Inside the Configured Root** (Section 7.3), **Workspace Identity Is Deterministic and Collision-Free** (Section 7.4).
 
-Failures: **Workspace Preparation Failed**, **Workspace Hook Failed**.
+Failures: **Workspace Preparation Failed** (Section 7.5), **Workspace Hook Failed** (Section 7.6).
 
 Validation checks:
 
@@ -953,7 +874,7 @@ Validation checks:
 - Leave a file in an existing workspace, run again, and verify the file survives.
 - Hang a hook past the configured timeout and verify the hook is abandoned.
 
-### 8.2 Workspace Hook Interface
+### 7.2 Workspace Hook Interface
 
 The operator's opportunity to bootstrap, prepare, tidy, and drain a Workspace at fixed points in a run's life.
 
@@ -1003,7 +924,7 @@ Validation checks:
 - Fail the removal hook and verify removal still completes.
 - Exceed the hook timeout and verify the hook is abandoned.
 
-### 8.3 Workspaces Stay Inside the Configured Root
+### 7.3 Workspaces Stay Inside the Configured Root
 
 Every path the subject creates, runs an agent in, or deletes resolves, after links are followed, to a location strictly inside the configured workspace root.
 
@@ -1023,7 +944,7 @@ Validation checks:
 - Ask for the workspace root itself and verify it is refused with a distinct reason.
 - Verify the agent's working directory is the workspace and not its parent.
 
-### 8.4 Workspace Identity Is Deterministic and Collision-Free
+### 7.4 Workspace Identity Is Deterministic and Collision-Free
 
 One Work Item identifier always maps to the same workspace identity, and two different identifiers never map to the same one.
 
@@ -1041,15 +962,15 @@ Validation checks:
 - Derive identities for two identifiers that sanitize alike and verify they differ.
 - Leave a file in a workspace, retry the item, and verify the file is still present.
 
-### 8.5 Workspace Preparation Failed
+### 7.5 Workspace Preparation Failed
 
 The run's Workspace could not be established: the path failed containment, the location was unusable, or the bootstrap did not complete.
 
-Occurs during **Prepare the Isolated Workspace**.
+Occurs during **Prepare the Isolated Workspace** (Section 7.1).
 
 Retryable: True.
 
-Requirements:
+Required behavior:
 
 - Do not start an Agent Session.
 - Remove a workspace that this run had just created.
@@ -1064,15 +985,15 @@ Validation checks:
 - Fail the creation hook on an existing workspace and verify its content survives.
 - Verify a later attempt re-runs the creation hook after a discarded workspace.
 
-### 8.6 Workspace Hook Failed
+### 7.6 Workspace Hook Failed
 
 An operator-supplied hook ended unsuccessfully or exceeded the hook timeout.
 
-Occurs during **Prepare the Isolated Workspace**, **Release the Claim and Clean Up**.
+Occurs during **Prepare the Isolated Workspace** (Section 7.1), **Release the Claim and Clean Up** (Section 9.6).
 
 Retryable: implementation-defined.
 
-Requirements:
+Required behavior:
 
 - Treat a creation-hook or pre-run-hook failure as a failure of the run.
 - Treat a post-run-hook failure as advisory and leave the run's outcome unchanged.
@@ -1089,11 +1010,11 @@ Validation checks:
 - Fail the removal hook and verify the workspace is still removed.
 - Hang a hook past the timeout and verify it is abandoned and reported.
 
-## 9. Agent Session and Turn Continuation
+## 8. Agent Session and Turn Continuation
 
 What the agent is told, what it is allowed to do, and how the subject decides whether one more Turn is worth starting. This chapter also carries the rule that keeps the subject's credentials out of the agent.
 
-### 9.1 Run the Agent Session
+### 8.1 Run the Agent Session
 
 Start a contained agent session inside the run's Workspace, deliver the work as a prompt, and observe the agent until the turn ends.
 
@@ -1135,9 +1056,9 @@ Requirements:
 - **MUST** — Abandon a turn that produces no agent activity within the silence timeout.
 - **SHOULD** — Report agent activity as it happens rather than only at turn end.
 
-Constrained by **Workspaces Stay Inside the Configured Root**, **The Agent Never Receives the Subject's Credentials**.
+Constrained by **Workspaces Stay Inside the Configured Root** (Section 7.3), **The Agent Never Receives the Subject's Credentials** (Section 8.5).
 
-Failures: **Agent Session Could Not Start**, **Turn Failed**.
+Failures: **Agent Session Could Not Start** (Section 8.7), **Turn Failed** (Section 8.8).
 
 Validation checks:
 
@@ -1147,7 +1068,7 @@ Validation checks:
 - Stop producing agent updates and verify the turn ends at the silence timeout.
 - Send an approval request under a restrictive policy and verify the turn ends as input-required.
 
-### 9.2 Continue or Conclude the Run
+### 8.2 Continue or Conclude the Run
 
 Decide, after each completed Turn, whether the Work Item still warrants more agent effort inside the same run.
 
@@ -1181,9 +1102,9 @@ Requirements:
 - **MUST** — Tell a continuation Turn to resume from the existing workspace state.
 - **MUST NOT** — Repeat the original task instructions in a continuation Turn.
 
-Constrained by **One Run's Turns Are Bounded**.
+Constrained by **One Run's Turns Are Bounded** (Section 8.6).
 
-Failures: **Turn Failed**.
+Failures: **Turn Failed** (Section 8.8).
 
 Validation checks:
 
@@ -1192,7 +1113,7 @@ Validation checks:
 - Remove a required label between turns and verify the run concludes.
 - Move the item out of the active states between turns and verify the run concludes.
 
-### 9.3 Agent Session Interface
+### 8.3 Agent Session Interface
 
 The boundary between the subject and the coding agent runtime: how a session begins, how a Turn is run, and what the subject learns while it runs.
 
@@ -1232,7 +1153,7 @@ Validation checks:
 - Emit updates steadily past the silence timeout and verify the turn continues.
 - Exit the agent process mid-turn and verify the turn fails.
 
-### 9.4 Work Prompt Interface
+### 8.4 Work Prompt Interface
 
 How a Work Item becomes the instruction the agent acts on, and how a continuation Turn differs from the first one.
 
@@ -1279,7 +1200,7 @@ Validation checks:
 - Render with an absent description and verify the default template still produces a prompt.
 - Start a continuation turn and verify the prompt tells the agent to resume.
 
-### 9.5 The Agent Never Receives the Subject's Credentials
+### 8.5 The Agent Never Receives the Subject's Credentials
 
 Every environment variable the configuration declares as credential-bearing for the Work Source is absent from the agent process.
 
@@ -1297,7 +1218,7 @@ Validation checks:
 - Verify the agent can still act on the board through an offered tool.
 - Verify the subject itself still reads the board successfully.
 
-### 9.6 One Run's Turns Are Bounded
+### 8.6 One Run's Turns Are Bounded
 
 A single Agent Run starts no more than the configured number of Turns, even while its Work Item stays active.
 
@@ -1313,15 +1234,15 @@ Validation checks:
 - Keep an item active and verify no more than the configured number of turns run.
 - Exhaust the budget and verify control returns to the scheduler with the claim held.
 
-### 9.7 Agent Session Could Not Start
+### 8.7 Agent Session Could Not Start
 
 The agent runtime could not be launched, did not answer the startup exchange in time, or rejected the session's policies.
 
-Occurs during **Run the Agent Session**.
+Occurs during **Run the Agent Session** (Section 8.1).
 
 Retryable: True.
 
-Requirements:
+Required behavior:
 
 - Stop any agent process that was started.
 - Leave the workspace in place.
@@ -1336,15 +1257,15 @@ Validation checks:
 - Withhold the startup response past the read timeout and verify the session start fails.
 - Verify no orphaned agent process survives a failed session start.
 
-### 9.8 Turn Failed
+### 8.8 Turn Failed
 
 A Turn ended without completing: the agent reported failure, the turn was cancelled, the agent process exited, or the turn went silent past its timeout.
 
-Occurs during **Run the Agent Session**, **Continue or Conclude the Run**.
+Occurs during **Run the Agent Session** (Section 8.1), **Continue or Conclude the Run** (Section 8.2).
 
 Retryable: True.
 
-Requirements:
+Required behavior:
 
 - End the Agent Session.
 - Leave the workspace in place so a later attempt can resume.
@@ -1360,11 +1281,11 @@ Validation checks:
 - Withhold updates past the silence timeout and verify the turn is abandoned.
 - Verify an input-required turn is not reported as a plain failure.
 
-## 10. Claim Lifecycle, Interruption, and Recovery
+## 9. Claim Lifecycle, Interruption, and Recovery
 
-What happens between runs. This chapter defines the states a Claim moves through, how the subject re-aligns with the board, how failure becomes another attempt, how a silent run is reclaimed, and how a run waiting on a human is held rather than retried.
+What happens between runs. This chapter defines the states a Claim moves through, how the subject re-aligns with the board, how failure becomes another attempt, how a silent run is reclaimed, and how a run waiting on a human is held rather than retried. Failure schedules another attempt rather than stopping, because an orchestrator that stops on first failure needs an operator to restart it.
 
-### 10.1 Lifecycle and State
+### 9.1 Lifecycle and State
 
 The lifecycle begins in **Eligible**.
 
@@ -1374,7 +1295,7 @@ The lifecycle begins in **Eligible**.
 - **Blocked** — The subject holds a Claim, no run is active, and the item awaits an operator decision.
 - **Released** — The subject holds no Claim. The item may become Eligible again as a fresh Claim. This is terminal.
 
-#### 10.1.1 Transitions
+#### 9.1.1 Transitions
 
 - **Eligible** → **Running** when the item is selected, revalidated, and an agent run starts for it.
 - **Running** → **Retry Waiting** when the run ends without carrying the item out of the active states.
@@ -1385,7 +1306,7 @@ The lifecycle begins in **Eligible**.
 - **Retry Waiting** → **Released** when the item stops qualifying while the delay is pending.
 - **Blocked** → **Released** when the item stops qualifying, or the subject restarts and forgets the block.
 
-#### 10.1.2 Lifecycle Constraints
+#### 9.1.2 Lifecycle Constraints
 
 - A Work Item MUST NOT be in more than one of these states at a time.
 - Running, Retry Waiting, and Blocked all hold the Claim.
@@ -1394,7 +1315,7 @@ The lifecycle begins in **Eligible**.
 - A Blocked item MUST NOT transition directly to Retry Waiting.
 - Losing the Claim record MUST make the item Eligible, never leave it orphaned.
 
-### 10.2 Reconcile Claimed Work Items
+### 9.2 Reconcile Claimed Work Items
 
 Re-align every Claim with what the Work Source now says, so nothing keeps working on an item that no longer qualifies.
 
@@ -1432,9 +1353,9 @@ Requirements:
 - **MUST** — Apply the same reconciliation rules to blocked items.
 - **MUST NOT** — Release any Claim when the reconciling read failed.
 
-Constrained by **A Claim Lives Only While Its Item Qualifies**.
+Constrained by **A Claim Lives Only While Its Item Qualifies** (Section 9.7).
 
-Failures: **Work Source Unavailable**, **Work Item No Longer Visible**.
+Failures: **Work Source Unavailable** (Section 6.7), **Work Item No Longer Visible** (Section 9.12).
 
 Validation checks:
 
@@ -1445,7 +1366,7 @@ Validation checks:
 - Hide a running item from the work source and verify the run stops and the workspace survives.
 - Fail the reconciling read and verify every claim and run is retained.
 
-### 10.3 Retry After Failure
+### 9.3 Retry After Failure
 
 Turn any non-blocking failure into another attempt at a later time, with a delay that grows while failures repeat.
 
@@ -1484,9 +1405,9 @@ Requirements:
 - **SHOULD** — Retry a normal completion sooner than a failure.
 - **MUST** — Report the failure reason with the pending retry.
 
-Constrained by **Retry Delay Grows and Is Capped**.
+Constrained by **Retry Delay Grows and Is Capped** (Section 9.8).
 
-Failures: **Work Source Unavailable**.
+Failures: **Work Source Unavailable** (Section 6.7).
 
 Validation checks:
 
@@ -1496,7 +1417,7 @@ Validation checks:
 - Deliver a superseded retry signal and verify it does not start a run.
 - Fill all capacity at retry time and verify a further retry is scheduled.
 
-### 10.4 Detect and Recover a Stalled Run
+### 9.4 Detect and Recover a Stalled Run
 
 Reclaim capacity from a run whose agent has stopped reporting activity, without mistaking a run waiting for a human for a stalled one.
 
@@ -1529,9 +1450,9 @@ Requirements:
 - **MUST** — Allow the operator to disable stall detection.
 - **MUST** — Count a restarted stalled run as a further retry attempt.
 
-Constrained by **Retry Delay Grows and Is Capped**.
+Constrained by **Retry Delay Grows and Is Capped** (Section 9.8).
 
-Failures: **Run Stalled**, **Operator Input Required**.
+Failures: **Run Stalled** (Section 9.10), **Operator Input Required** (Section 9.11).
 
 Validation checks:
 
@@ -1539,7 +1460,7 @@ Validation checks:
 - Silence a run that already requested operator input and verify it becomes blocked.
 - Disable stall detection and verify a silent run is left alone.
 
-### 10.5 Hold a Work Item Blocked on Operator Input
+### 9.5 Hold a Work Item Blocked on Operator Input
 
 Keep a Work Item and its Claim held, and make the pending human decision visible, instead of retrying work that cannot proceed.
 
@@ -1573,9 +1494,9 @@ Requirements:
 - **MUST** — Release a blocked item that reaches a terminal state and remove its workspace.
 - **SHOULD** — Distinguish an approval request from a request for information.
 
-Constrained by **A Blocked Item Is Held, Not Retried**.
+Constrained by **A Blocked Item Is Held, Not Retried** (Section 9.9).
 
-Failures: **Operator Input Required**.
+Failures: **Operator Input Required** (Section 9.11).
 
 Validation checks:
 
@@ -1583,7 +1504,7 @@ Validation checks:
 - Verify a blocked item is not selected for dispatch while it stays blocked.
 - Move a blocked item to a terminal state and verify its claim and workspace are released.
 
-### 10.6 Release the Claim and Clean Up
+### 9.6 Release the Claim and Clean Up
 
 End the subject's involvement with a Work Item and reclaim the resources its Claim was holding.
 
@@ -1617,9 +1538,9 @@ Requirements:
 - **MUST** — Reclaim workspaces of items already terminal when the subject starts.
 - **MUST** — Prefer the workspace recorded for the run over a re-derived path.
 
-Constrained by **Workspaces Stay Inside the Configured Root**, **A Claim Lives Only While Its Item Qualifies**.
+Constrained by **Workspaces Stay Inside the Configured Root** (Section 7.3), **A Claim Lives Only While Its Item Qualifies** (Section 9.7).
 
-Failures: **Workspace Hook Failed**.
+Failures: **Workspace Hook Failed** (Section 7.6).
 
 Validation checks:
 
@@ -1628,7 +1549,7 @@ Validation checks:
 - Point a recorded workspace path at an escaping link and verify removal is refused.
 - Start the subject with terminal items present and verify their workspaces are reclaimed.
 
-### 10.7 A Claim Lives Only While Its Item Qualifies
+### 9.7 A Claim Lives Only While Its Item Qualifies
 
 A Claim is released as soon as its Work Item reaches a terminal state, leaves the active states, stops being routed to this deployment, or stops being visible.
 
@@ -1647,7 +1568,7 @@ Validation checks:
 - Remove a required label from a running item and verify the claim is released.
 - Fail the reconciling read and verify no claim is released.
 
-### 10.8 Retry Delay Grows and Is Capped
+### 9.8 Retry Delay Grows and Is Capped
 
 Consecutive failures for one Claim produce non-decreasing delays that never exceed the configured ceiling, and at most one retry is pending per item.
 
@@ -1666,7 +1587,7 @@ Validation checks:
 - Schedule a new retry over a pending one and verify only the newer one fires.
 - Deliver a superseded retry signal and verify it starts no run.
 
-### 10.9 A Blocked Item Is Held, Not Retried
+### 9.9 A Blocked Item Is Held, Not Retried
 
 A Work Item whose agent is awaiting an operator decision holds its Claim, has no active run, and has no pending retry until it stops qualifying.
 
@@ -1684,15 +1605,15 @@ Validation checks:
 - Verify the blocked item is not dispatched while it stays blocked.
 - Verify the reason for blocking is present in the runtime state.
 
-### 10.10 Run Stalled
+### 9.10 Run Stalled
 
 An Agent Run has produced no observable agent activity for longer than the configured stall timeout, without reporting either success or failure.
 
-Occurs during **Detect and Recover a Stalled Run**.
+Occurs during **Detect and Recover a Stalled Run** (Section 9.4).
 
 Retryable: True.
 
-Requirements:
+Required behavior:
 
 - Stop the run rather than let it hold capacity indefinitely.
 - Count the restart as a further retry attempt so backoff applies.
@@ -1708,15 +1629,15 @@ Validation checks:
 - Verify the stalled run's workspace survives the restart.
 - Disable stall detection and verify a silent run is not restarted.
 
-### 10.11 Operator Input Required
+### 9.11 Operator Input Required
 
 The agent cannot proceed without a human decision: an approval, an answer, or a choice the configured policy does not permit the subject to make.
 
-Occurs during **Hold a Work Item Blocked on Operator Input**, **Detect and Recover a Stalled Run**.
+Occurs during **Hold a Work Item Blocked on Operator Input** (Section 9.5), **Detect and Recover a Stalled Run** (Section 9.4).
 
 Retryable: False.
 
-Requirements:
+Required behavior:
 
 - End the run without scheduling a retry.
 - Retain the Claim so nothing else picks the item up.
@@ -1732,15 +1653,15 @@ Validation checks:
 - Verify a blocked item keeps its claim and stays out of dispatch.
 - Close a blocked item and verify its claim is released and its workspace removed.
 
-### 10.12 Work Item No Longer Visible
+### 9.12 Work Item No Longer Visible
 
 A claimed Work Item is absent from a read that requested it by identity. It was deleted, moved out of scope, or hidden from the configured credential.
 
-Occurs during **Reconcile Claimed Work Items**, **Poll and Dispatch**.
+Occurs during **Reconcile Claimed Work Items** (Section 9.2), **Poll and Dispatch** (Section 6.1).
 
 Retryable: False.
 
-Requirements:
+Required behavior:
 
 - Stop any active run for the item.
 - Release the Claim.
@@ -1755,11 +1676,11 @@ Validation checks:
 - Hide a running item and verify its workspace is preserved.
 - Fail the read entirely and verify the claim is retained instead of released.
 
-## 11. Configuration and Reload
+## 10. Configuration and Reload
 
 The one document an operator edits, and the guarantee that editing it badly cannot take a working deployment down.
 
-### 11.1 Load and Reload the Workflow Definition
+### 10.1 Load and Reload the Workflow Definition
 
 Make the operator's declaration effective, keep it current while running, and never let an invalid edit degrade a healthy deployment.
 
@@ -1796,9 +1717,9 @@ Requirements:
 - **MUST** — Resolve credential references from the environment rather than storing secrets inline.
 - **SHOULD** — Apply a changed limit from the next decision, not retroactively.
 
-Constrained by **Only a Valid Configuration Is Ever Effective**.
+Constrained by **Only a Valid Configuration Is Ever Effective** (Section 10.3).
 
-Failures: **Invalid Workflow Definition**.
+Failures: **Invalid Workflow Definition** (Section 10.4).
 
 Validation checks:
 
@@ -1807,7 +1728,7 @@ Validation checks:
 - Make a valid definition invalid while running and verify the failure is reported.
 - Change a limit while running and verify later decisions use the new value.
 
-### 11.2 Workflow Definition Interface
+### 10.2 Workflow Definition Interface
 
 The single document an operator edits to declare which work is orchestrated, how runs behave, and what the agent is told.
 
@@ -1867,7 +1788,7 @@ Validation checks:
 - Give a relative workspace root and verify it resolves against the document's location.
 - Leave the prompt template empty and verify the default template is used.
 
-### 11.3 Only a Valid Configuration Is Ever Effective
+### 10.3 Only a Valid Configuration Is Ever Effective
 
 The effective configuration is always a version that passed validation. An invalid version neither starts the subject nor replaces a running one.
 
@@ -1886,15 +1807,15 @@ Validation checks:
 - Invalidate the document while running and verify the failure is reported.
 - Repair the document and verify the new settings become effective without restart.
 
-### 11.4 Invalid Workflow Definition
+### 10.4 Invalid Workflow Definition
 
 The Workflow Definition is missing, unparsable, or fails validation for the selected Work Source.
 
-Occurs during **Load and Reload the Workflow Definition**.
+Occurs during **Load and Reload the Workflow Definition** (Section 10.1).
 
 Retryable: True.
 
-Requirements:
+Required behavior:
 
 - Refuse to start when this is the first load.
 - Keep the last valid configuration effective when the subject is already running.
@@ -1910,11 +1831,11 @@ Validation checks:
 - Invalidate the document while running and verify behavior is unchanged.
 - Repair the document and verify the new settings become effective without restart.
 
-## 12. Observability
+## 11. Observability
 
 What an operator can see and how they can ask the subject to look again. This chapter also states how resource usage is accounted so that cost figures stay trustworthy.
 
-### 12.1 Publish Runtime State
+### 11.1 Publish Runtime State
 
 Give operators a current, self-explaining picture of what the subject is doing and what each run has consumed.
 
@@ -1949,9 +1870,9 @@ Requirements:
 - **MUST** — Coalesce repeated immediate-poll requests into one cycle.
 - **SHOULD** — Report the workspace and execution location of every run.
 
-Constrained by **Reported Usage Never Decreases Within a Run**.
+Constrained by **Reported Usage Never Decreases Within a Run** (Section 11.4).
 
-Failures: **Work Source Unavailable**.
+Failures: **Work Source Unavailable** (Section 6.7).
 
 Validation checks:
 
@@ -1960,7 +1881,7 @@ Validation checks:
 - Request an immediate poll twice in quick succession and verify one cycle results.
 - Report a smaller cumulative usage figure and verify the run's totals do not decrease.
 
-### 12.2 Runtime State Interface
+### 11.2 Runtime State Interface
 
 The read model an operator or tool uses to see what is happening now, and the one control it may exercise over timing.
 
@@ -1998,7 +1919,7 @@ Validation checks:
 - Make the scheduler unresponsive and verify a timeout result rather than a hang.
 - Request an immediate poll during a running cycle and verify coalescing is reported.
 
-### 12.3 Observability Service Interface (Optional Extension)
+### 11.3 Observability Service Interface (Optional Extension)
 
 Serve the Runtime State over a network to operators and tools, when a deployment chooses to expose it.
 
@@ -2034,7 +1955,7 @@ Validation checks:
 - Request an unknown route and verify a not-found response.
 - Use an unsupported method on a known route and verify a method-not-allowed response.
 
-### 12.4 Reported Usage Never Decreases Within a Run
+### 11.4 Reported Usage Never Decreases Within a Run
 
 Cumulative usage reported for an Agent Run is non-decreasing, and an incremental report is never added on top of a cumulative one for the same usage.
 
@@ -2052,13 +1973,13 @@ Validation checks:
 - Report a cumulative total and its increment and verify the increment is not added.
 - Start a further turn on the same session and verify totals continue rather than reset.
 
-## 13. Distributed Execution (Optional Extension)
+## 12. Distributed Execution (Optional Extension)
 
 Spreading runs across several execution locations. A conforming implementation may run everything locally and omit this chapter entirely.
 
 This is an optional extension. A conforming implementation may omit it entirely. When implemented, its semantics are normative in full.
 
-### 13.1 Run on a Remote Worker Host (Optional Extension)
+### 12.1 Run on a Remote Worker Host (Optional Extension)
 
 Spread Agent Runs across several execution locations while keeping each run whole on the location it started on.
 
@@ -2095,9 +2016,9 @@ Requirements:
 - **SHOULD** — Return a retrying run to the host that already holds its workspace.
 - **MUST** — Apply the workspace containment rules on the remote host too.
 
-Constrained by **A Run Stays on One Execution Location**, **Concurrency Limits Are Never Exceeded**.
+Constrained by **A Run Stays on One Execution Location** (Section 12.2), **Concurrency Limits Are Never Exceeded** (Section 6.5).
 
-Failures: **Worker Host Unreachable**.
+Failures: **Worker Host Unreachable** (Section 12.3).
 
 Validation checks:
 
@@ -2106,7 +2027,7 @@ Validation checks:
 - Retry a run whose host still has capacity and verify the same host is chosen.
 - Make one host unreachable and verify the failure surfaces as a normal run failure.
 
-### 13.2 A Run Stays on One Execution Location
+### 12.2 A Run Stays on One Execution Location
 
 One Agent Run prepares its workspace and runs its session on a single execution location, and a failure never moves the same run to another location.
 
@@ -2124,17 +2045,17 @@ Validation checks:
 - Verify a run's workspace and session report the same execution location.
 - Retry an item whose host still has capacity and verify the same host is chosen.
 
-### 13.3 Worker Host Unreachable (Optional Extension)
+### 12.3 Worker Host Unreachable (Optional Extension)
 
 The chosen execution location could not be reached, or a command on it could not be run.
 
 This is an optional extension. A conforming implementation may omit it entirely. When implemented, its semantics are normative in full.
 
-Occurs during **Run on a Remote Worker Host**.
+Occurs during **Run on a Remote Worker Host** (Section 12.1).
 
 Retryable: True.
 
-Requirements:
+Required behavior:
 
 - Report the failure as a failure of the run.
 - Do not move the run to a different execution location.
@@ -2149,13 +2070,13 @@ Validation checks:
 - Verify the retry does not start on a different host.
 - Verify the unreachable host is named in the failure report.
 
-## 14. Provider-Native Agent Tools (Optional Extension)
+## 13. Provider-Native Agent Tools (Optional Extension)
 
 Letting the agent act on the board through the subject's credential instead of its own. A conforming implementation may omit this chapter; the agent then needs its own access, or none.
 
 This is an optional extension. A conforming implementation may omit it entirely. When implemented, its semantics are normative in full.
 
-### 14.1 Execute a Provider-Native Agent Tool (Optional Extension)
+### 13.1 Execute a Provider-Native Agent Tool (Optional Extension)
 
 Let the agent act on the board through the subject's credential, instead of giving the agent that credential.
 
@@ -2191,9 +2112,9 @@ Requirements:
 - **MUST NOT** — Add retry, deduplication, or rate-limit policy on the agent's behalf.
 - **MUST** — State that tool reach follows the credential, not the scheduler's scope.
 
-Constrained by **The Agent Never Receives the Subject's Credentials**.
+Constrained by **The Agent Never Receives the Subject's Credentials** (Section 8.5).
 
-Failures: **Agent Tool Call Failed**.
+Failures: **Agent Tool Call Failed** (Section 13.3).
 
 Validation checks:
 
@@ -2202,7 +2123,7 @@ Validation checks:
 - Call an unknown tool and verify a failure result naming supported tools is returned.
 - Call a tool with malformed arguments and verify a structured failure is returned.
 
-### 14.2 Provider-Native Agent Tool Interface (Optional Extension)
+### 13.2 Provider-Native Agent Tool Interface (Optional Extension)
 
 Let the agent operate on the board through the subject's credential, with a declared argument shape and a structured result.
 
@@ -2240,17 +2161,17 @@ Validation checks:
 - Call with malformed arguments and verify a structured failure result.
 - Remove the credential and verify a failure that names the missing setting.
 
-### 14.3 Agent Tool Call Failed (Optional Extension)
+### 13.3 Agent Tool Call Failed (Optional Extension)
 
 A provider-native tool call could not be executed or the provider rejected it.
 
 This is an optional extension. A conforming implementation may omit it entirely. When implemented, its semantics are normative in full.
 
-Occurs during **Execute a Provider-Native Agent Tool**.
+Occurs during **Execute a Provider-Native Agent Tool** (Section 13.1).
 
 Retryable: implementation-defined.
 
-Requirements:
+Required behavior:
 
 - Return a structured failure result to the agent rather than ending the turn.
 - State the reason in terms the agent can act on.
@@ -2266,9 +2187,9 @@ Validation checks:
 - Remove the credential and verify a failure naming the missing setting.
 - Fail the provider call and verify the turn continues with a failure result.
 
-## 15. Implementation-Defined Areas
+## 14. Implementation-Defined Areas
 
-### 15.1 Work source and its protocol
+### 14.1 Work source and its protocol
 
 Any system that can be read by state and by item identity may serve as the Work Source, over any protocol.
 
@@ -2287,7 +2208,7 @@ A conforming implementation must document:
 - How the provider's readiness signal is derived.
 - Which failures map to configuration, authentication, transport, and rate limiting.
 
-### 15.2 Agent runtime and its protocol
+### 14.2 Agent runtime and its protocol
 
 Any coding agent that accepts a prompt, works in a directory, and reports progress may be driven.
 
@@ -2305,7 +2226,7 @@ A conforming implementation must document:
 - Which policy setting permits the subject to answer approvals.
 - Which runtime signals are read as a request for operator input.
 
-### 15.3 Runtime state durability
+### 14.3 Runtime state durability
 
 Claims, retries, and blocked records may be held in memory, persisted, or replicated.
 
@@ -2321,7 +2242,7 @@ A conforming implementation must document:
 - What happens to a blocked item when the subject restarts.
 - Whether an interrupted run's workspace is reused, reset, or removed on restart.
 
-### 15.4 Retry delay curve
+### 14.4 Retry delay curve
 
 The exact growth curve, jitter, and starting delay of the retry sequence are unconstrained.
 
@@ -2336,7 +2257,7 @@ A conforming implementation must document:
 - The chosen curve and its starting delay.
 - Whether jitter is applied.
 
-### 15.5 Workspace storage and naming
+### 14.5 Workspace storage and naming
 
 The layout, naming scheme, and storage medium of workspaces are unconstrained.
 
@@ -2352,7 +2273,7 @@ A conforming implementation must document:
 - How identifiers that contain unusable characters are disambiguated.
 - Whether workspaces are ever reclaimed for reasons other than a terminal item.
 
-### 15.6 Execution and concurrency model
+### 14.6 Execution and concurrency model
 
 Runs may execute as processes, threads, containers, or remote jobs, in one or many execution units.
 
@@ -2368,7 +2289,7 @@ A conforming implementation must document:
 - How a stopped run's agent process is guaranteed to end.
 - Whether the scheduler authority is replicated and how that stays consistent.
 
-### 15.7 Observability presentation and transport
+### 14.7 Observability presentation and transport
 
 Runtime State may be presented on a terminal, over a network, through logs, or not at all beyond the required derivation.
 
@@ -2384,7 +2305,7 @@ A conforming implementation must document:
 - The shape of the read model, if one is served.
 - Whether any history is retained.
 
-### 15.8 Logging and diagnostics
+### 14.8 Logging and diagnostics
 
 Log format, level, destination, and rotation are unconstrained.
 
@@ -2399,17 +2320,17 @@ A conforming implementation must document:
 - Where logs are written and how they are rotated.
 - How sensitive values are kept out of logs.
 
-## 16. Reference Implementation
+## 15. Reference Implementation
 
 The reference implementation is an Elixir/OTP service that polls an issue tracker, creates a workspace per issue, launches a Codex app-server session inside it, and keeps that session working until the issue leaves the active set. It is one realization of this specification and adds no normative requirements.
 
 The reference implementation is **not normative**; it is one realization of this specification.
 
-## 17. Test and Validation Matrix
+## 16. Test and Validation Matrix
 
 Checks assembled from the verification clauses of this specification. A conforming implementation should be able to demonstrate each of them. Checks under an optional extension apply only when that extension is implemented.
 
-### 17.1 Work Intake and Dispatch
+### 16.1 Work Intake and Dispatch
 
 - **Poll and Dispatch** — Offer more qualifying items than the configured limit and verify no run exceeds the limit.
 - **Poll and Dispatch** — Present a claimed item again in the same cycle and verify no second run starts.
@@ -2438,7 +2359,7 @@ Checks assembled from the verification clauses of this specification. A conformi
 - **Work Source Unavailable** — Fail the reconciling read and verify every claim survives.
 - **Work Source Unavailable** — Fail the read during a retry and verify a further retry is scheduled.
 
-### 17.2 Isolated Execution Environment
+### 16.2 Isolated Execution Environment
 
 - **Prepare the Isolated Workspace** — Point the workspace path at a link that escapes the root and verify the run is refused.
 - **Prepare the Isolated Workspace** — Request the workspace for the same identifier twice and verify one identity results.
@@ -2465,7 +2386,7 @@ Checks assembled from the verification clauses of this specification. A conformi
 - **Workspace Hook Failed** — Fail the removal hook and verify the workspace is still removed.
 - **Workspace Hook Failed** — Hang a hook past the timeout and verify it is abandoned and reported.
 
-### 17.3 Agent Session and Turn Continuation
+### 16.3 Agent Session and Turn Continuation
 
 - **Run the Agent Session** — Start a session and verify the agent's working directory is the run workspace.
 - **Run the Agent Session** — Configure a credential variable and verify it is absent from the agent process.
@@ -2496,7 +2417,7 @@ Checks assembled from the verification clauses of this specification. A conformi
 - **Turn Failed** — Withhold updates past the silence timeout and verify the turn is abandoned.
 - **Turn Failed** — Verify an input-required turn is not reported as a plain failure.
 
-### 17.4 Claim Lifecycle, Interruption, and Recovery
+### 16.4 Claim Lifecycle, Interruption, and Recovery
 
 - **Reconcile Claimed Work Items** — Move a running item to a terminal state and verify the run stops and the workspace is removed.
 - **Reconcile Claimed Work Items** — Move a running item to a non-active state and verify the run stops and the workspace survives.
@@ -2540,7 +2461,7 @@ Checks assembled from the verification clauses of this specification. A conformi
 - **Work Item No Longer Visible** — Hide a running item and verify its workspace is preserved.
 - **Work Item No Longer Visible** — Fail the read entirely and verify the claim is retained instead of released.
 
-### 17.5 Configuration and Reload
+### 16.5 Configuration and Reload
 
 - **Load and Reload the Workflow Definition** — Start with an invalid definition and verify the subject does not start.
 - **Load and Reload the Workflow Definition** — Make a valid definition invalid while running and verify prior settings stay effective.
@@ -2558,7 +2479,7 @@ Checks assembled from the verification clauses of this specification. A conformi
 - **Invalid Workflow Definition** — Invalidate the document while running and verify behavior is unchanged.
 - **Invalid Workflow Definition** — Repair the document and verify the new settings become effective without restart.
 
-### 17.6 Observability
+### 16.6 Observability
 
 - **Publish Runtime State** — Run, retry, and block one item each, then verify all three are distinguishable.
 - **Publish Runtime State** — Stop answering snapshot requests and verify the reader is told state is unavailable.
@@ -2574,7 +2495,7 @@ Checks assembled from the verification clauses of this specification. A conformi
 - **Reported Usage Never Decreases Within a Run** — Report a cumulative total and its increment and verify the increment is not added.
 - **Reported Usage Never Decreases Within a Run** — Start a further turn on the same session and verify totals continue rather than reset.
 
-### 17.7 Distributed Execution (Optional Extension)
+### 16.7 Distributed Execution (Optional Extension)
 
 - **Run on a Remote Worker Host** — Fill every host to its configured share and verify dispatch is deferred.
 - **Run on a Remote Worker Host** — Fail a run on one host and verify the retry does not start on another host.
@@ -2587,7 +2508,7 @@ Checks assembled from the verification clauses of this specification. A conformi
 - **Worker Host Unreachable** — Verify the retry does not start on a different host.
 - **Worker Host Unreachable** — Verify the unreachable host is named in the failure report.
 
-### 17.8 Provider-Native Agent Tools (Optional Extension)
+### 16.8 Provider-Native Agent Tools (Optional Extension)
 
 - **Execute a Provider-Native Agent Tool** — Call an advertised tool and verify it runs with the session-bound settings.
 - **Execute a Provider-Native Agent Tool** — Change the effective settings mid-session and verify the bound settings are still used.
@@ -2600,11 +2521,11 @@ Checks assembled from the verification clauses of this specification. A conformi
 - **Agent Tool Call Failed** — Remove the credential and verify a failure naming the missing setting.
 - **Agent Tool Call Failed** — Fail the provider call and verify the turn continues with a failure result.
 
-## 18. Implementation Checklist (Definition of Done)
+## 17. Implementation Checklist (Definition of Done)
 
 Generated from the specification graph. Intentionally redundant with the body.
 
-### 18.1 Core
+### 17.1 Core
 
 - Interactions: **Poll and Dispatch**, **Prepare the Isolated Workspace**, **Run the Agent Session**, **Continue or Conclude the Run**, **Reconcile Claimed Work Items**, **Retry After Failure**, **Detect and Recover a Stalled Run**, **Hold a Work Item Blocked on Operator Input**, **Release the Claim and Clean Up**, **Load and Reload the Workflow Definition**, **Publish Runtime State**.
 - Lifecycle: implement every state and transition of the lifecycle.
@@ -2614,7 +2535,7 @@ Generated from the specification graph. Intentionally redundant with the body.
 - Configuration fields: `work-source.selection`, `work-source.credential`, `scheduling.active-states`, `scheduling.terminal-states`, `scheduling.required-labels`, `scheduling.poll-interval`, `capacity.max-concurrent-runs`, `capacity.max-concurrent-runs-by-state`, `capacity.max-turns-per-run`, `recovery.max-retry-delay`, `recovery.stall-timeout`, `workspace.root`, `workspace.hooks`, `workspace.hook-timeout`, `agent.command`, `agent.prompt-template`, `agent.approval-policy`, `agent.sandbox-policy`, `agent.turn-silence-timeout`, `agent.startup-response-timeout`, `observability.exposure`.
 - Documentation: record the selected behavior for every implementation-defined area.
 
-### 18.2 Optional extensions (normative in full when implemented)
+### 17.2 Optional extensions (normative in full when implemented)
 
 - **Run on a Remote Worker Host**
 - **Execute a Provider-Native Agent Tool**
@@ -2627,7 +2548,7 @@ Generated from the specification graph. Intentionally redundant with the body.
 - `workers.max-runs-per-host`
 - `observability.service-endpoint`
 
-## 19. Conformance
+## 18. Conformance
 
 Implement a conforming realization of this specification. Preserve the normative semantics and the design intent. Do not infer additional constraints from the reference implementation. Where behavior is implementation-defined, choose a reasonable mechanism that preserves all stated invariants.
 

@@ -1,3 +1,13 @@
+# Rationale has no record type and no section of its own. Write it at the grain
+# of what it justifies, in the slot that already exists for that grain:
+#
+#   whole subject  -> the prose below, as a stated boundary of the subject
+#   one chapter    -> that chapter's `overview:` in chapters.yaml
+#   one record     -> `intent:` on the invariant, or a sentence in the record
+#
+# A separate design-intent list ends up as a collection nothing points at, and
+# it pre-announces the invariants that state the same facts one section later.
+
 context: >
   Describe the environment, assumptions, and forces needed to understand the subject.
 
@@ -6,7 +16,9 @@ problem: >
 
 why_specification_exists: >
   Explain which design knowledge, guarantees, or boundaries would otherwise be
-  lost, misunderstood, or coupled to a particular implementation.
+  lost, misunderstood, or coupled to a particular implementation. State the
+  boundaries the subject holds to across all of its behavior here, where a
+  reader meets them before anything rests on them.
 
 goals:
   - Preserve the subject's intended semantics independently of implementation mechanism.
@@ -14,15 +26,3 @@ goals:
 
 non_goals:
   - Prescribe internal structure unless that structure is itself part of the contract.
-
-design_intents:
-  - name: Preserve semantic behavior
-    intent: >
-      Conforming implementations should be free to vary internally while preserving
-      externally meaningful behavior and the relationships between core concepts.
-    why_it_matters: >
-      Reproducing implementation details is not the same as preserving the system.
-    implications:
-      - Normative statements should describe semantics before mechanisms.
-    tradeoffs:
-      - Some implementation freedom is intentionally left unresolved by the specification.

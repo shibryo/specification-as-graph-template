@@ -1,8 +1,8 @@
 # Optional chapter layer.
 #
 # Chapters group behavior records (interactions, interfaces, invariants,
-# failures, and optionally the literal token `lifecycle`) into the order a
-# reader should encounter them. Cut them by component, not by execution phase.
+# failures, and the literal tokens `lifecycle` and `parameters`) into the order
+# a reader should encounter them. Cut them by component, not by execution phase.
 # Concepts and responsibilities stay in the global System Model section. When
 # this file is absent or empty, the renderer falls back to type-ordered
 # sections.
@@ -10,6 +10,16 @@
 # `layer:` names the layer from model.yaml that this chapter expands. Chapters
 # must appear in the order their layers are declared, and extension chapters
 # sort last; validation checks both. See the chapter order rule in AGENTS.md.
+#
+# `contains:` also accepts, at most once each across the whole document:
+#   lifecycle    — the state machine renders as a subsection of this chapter
+#   parameters   — the configuration field list renders here instead of as a
+#                  fixed front section, so the fields sit with the behavior that
+#                  resolves and reloads them
+#
+# `overview:` is where a chapter's rationale goes. Say what the chapter covers
+# and why it is shaped this way; that is the grain at which a reader wants a
+# reason, and it is why there is no design-intent section.
 chapters:
   - id: chapter.request-processing
     name: Request Processing
@@ -17,10 +27,14 @@ chapters:
     overview: >
       How a Request becomes a Result: the end-to-end flow, the interface it is
       submitted through, the guarantees the flow must uphold, its lifecycle,
-      and how it behaves when processing is interrupted.
+      the operator contract that tunes it, and how it behaves when processing is
+      interrupted. Every path through this chapter ends in exactly one
+      authoritative outcome, because a caller that cannot tell a Result from a
+      failure cannot act on either.
     contains:
       - interaction.process-request
       - interface.example
       - lifecycle
+      - parameters
       - invariant.outcome-is-unambiguous
       - failure.processing-interrupted
