@@ -1,112 +1,105 @@
 areas:
-  - name: Configuration document syntax
+  - name: Work source and its protocol
     freedom: >
-      Any concrete syntax may carry the workflow document, provided one
-      artifact combines structured settings and the prompt template.
+      Any system that can be read by state and by item identity may serve as the Work
+      Source, over any protocol.
     fixed_semantics:
-      - Setting semantics follow the parameter keys of this specification.
-      - Environment references resolve at load time.
+      - Reads are scoped to one configured collection of work.
+      - Records that cannot be normalized are dropped, not returned partially formed.
+      - A read failure is distinguishable from an empty result.
+      - Provider readiness never bypasses scheduler policy.
     document:
-      - The concrete syntax and the mapping from parameter keys to setting names.
-      - The template language and its strictness behavior.
+      - Which system is supported and how its scope is expressed.
+      - Which native field becomes the Work Item identity and which becomes the identifier.
+      - Which native states are expected to be configured as active and terminal.
+      - How the provider's readiness signal is derived.
+      - Which failures map to configuration, authentication, transport, and rate limiting.
 
-  - name: Configuration change detection
+  - name: Agent runtime and its protocol
     freedom: >
-      Any mechanism may detect workflow document changes (polling a content
-      stamp, filesystem events, explicit signal).
+      Any coding agent that accepts a prompt, works in a directory, and reports
+      progress may be driven.
     fixed_semantics:
-      - Valid edits become effective without a restart.
-      - Detection latency is bounded and small relative to the poll interval.
+      - The agent runs with the run's Workspace as its working directory.
+      - The agent does not receive the subject's work source credentials.
+      - A turn ends as completed, failed, or awaiting operator input.
+      - Silence past the configured timeout ends the turn.
     document:
-      - The detection mechanism and its worst-case latency.
+      - Which agent runtime is supported and how it is launched.
+      - How approval and sandbox policies are expressed for that runtime.
+      - Which policy setting permits the subject to answer approvals.
+      - Which runtime signals are read as a request for operator input.
 
-  - name: Retry backoff curve
+  - name: Runtime state durability
     freedom: >
-      The delay progression between failure retries is free (the reference
-      doubles from a base of ten seconds).
+      Claims, retries, and blocked records may be held in memory, persisted, or
+      replicated.
     fixed_semantics:
-      - Delays never decrease across consecutive failures of one issue.
-      - Delays never exceed the configured maximum backoff.
-      - The check after a normal run completion uses a much shorter delay than failure retries.
+      - The Work Source stays authoritative regardless of what is retained.
+      - Losing runtime state must not leave a Work Item permanently unclaimable.
+      - A restart must not produce two concurrent runs for one item.
     document:
-      - The base delay, the growth rule, and the continuation-check delay.
+      - What survives a restart and what does not.
+      - What happens to a blocked item when the subject restarts.
+      - Whether an interrupted run's workspace is reused, reset, or removed on restart.
 
-  - name: Workspace naming scheme
+  - name: Retry delay curve
     freedom: >
-      The mapping from issue identifier to workspace directory name is free
-      (the reference sanitizes the identifier and appends a content hash when
-      sanitization changed it).
+      The exact growth curve, jitter, and starting delay of the retry sequence are
+      unconstrained.
     fixed_semantics:
-      - The mapping is deterministic and injective per the workspace-determinism invariant.
-      - Resulting names are safe for the target filesystem.
+      - Consecutive failures produce non-decreasing delays.
+      - No delay exceeds the configured ceiling.
+      - A normal completion with the item still active may be retried sooner than a failure.
     document:
-      - The exact derivation so external tooling can locate a workspace from an identifier.
+      - The chosen curve and its starting delay.
+      - Whether jitter is applied.
 
-  - name: Process and supervision topology
+  - name: Workspace storage and naming
     freedom: >
-      Runs, timers, and the scheduler may be threads, processes, actors, or
-      tasks in any supervision arrangement.
+      The layout, naming scheme, and storage medium of workspaces are unconstrained.
     fixed_semantics:
-      - A crashed run is always observed by the scheduler and enters retry or blocked handling.
-      - Stopping a run releases its session and its monitoring resources.
+      - Identity is a deterministic function of the Work Item identifier.
+      - Distinct identifiers never collapse onto one workspace.
+      - Every path resolves inside the configured root after links are followed.
     document:
-      - The supervision arrangement and how run termination is detected.
+      - How a workspace name is derived from an identifier.
+      - How identifiers that contain unusable characters are disambiguated.
+      - Whether workspaces are ever reclaimed for reasons other than a terminal item.
 
-  - name: Input-required signal recognition
+  - name: Execution and concurrency model
     freedom: >
-      The concrete protocol signals recognized as "the agent needs a human"
-      depend on the agent runtime dialect (the reference matches specific
-      event kinds, completion outcomes, and an elicitation method name).
+      Runs may execute as processes, threads, containers, or remote jobs, in one or
+      many execution units.
     fixed_semantics:
-      - Any signal meaning the session awaits operator input or approval must route to blocked handling, never to automatic retry.
+      - Exactly one authority owns the claim set.
+      - Stopping a run stops its agent process.
+      - Concurrency limits are enforced against actually active runs.
     document:
-      - The recognized signal set for the supported runtime dialect.
+      - How runs are isolated from one another.
+      - How a stopped run's agent process is guaranteed to end.
+      - Whether the scheduler authority is replicated and how that stays consistent.
 
-  - name: Session telemetry extraction
+  - name: Observability presentation and transport
     freedom: >
-      How token usage and rate-limit data are located inside runtime payloads
-      is free; payload shapes vary by runtime version.
+      Runtime State may be presented on a terminal, over a network, through logs, or
+      not at all beyond the required derivation.
     fixed_semantics:
-      - Extracted totals obey the monotonic token accounting invariant.
+      - Running, retrying, and blocked items remain distinguishable.
+      - Reasons for retrying and blocking remain visible.
+      - Presentation never delays scheduling.
     document:
-      - The payload shapes recognized for usage and rate-limit extraction.
+      - Which presentations are offered and how they are enabled.
+      - The shape of the read model, if one is served.
+      - Whether any history is retained.
 
-  - name: Remote transport
+  - name: Logging and diagnostics
     freedom: >
-      The remote-execution extension may use any transport that executes
-      commands and streams a session on the worker host (the reference uses
-      the system OpenSSH client, honoring an operator-supplied client
-      configuration and host:port shorthand).
+      Log format, level, destination, and rotation are unconstrained.
     fixed_semantics:
-      - Remote commands are bounded by timeouts.
-      - Remote workspace and hook semantics match the local ones.
+      - Failures that trigger a retry or a block are reported.
+      - Reload failures are reported until the configuration is repaired.
     document:
-      - The transport, its authentication expectations, and host addressing syntax.
-
-  - name: Log persistence
-    freedom: >
-      Any durable logging arrangement may be used (the reference rotates a
-      size-bounded on-disk log and silences the console in favor of the
-      terminal dashboard).
-    fixed_semantics:
-      - Failures, retries, blocks, releases, and hook failures are logged with issue context.
-    document:
-      - The log destination, rotation policy, and how to redirect it.
-
-  - name: Dashboard presentation
-    freedom: >
-      The layout, styling, and level of detail of the terminal and browser
-      dashboards are free.
-    fixed_semantics:
-      - Running, retrying, and blocked claims with their reasons remain visible.
-    document:
-      - What each dashboard column or field means.
-
-  - name: Adapter default state sets
-    freedom: >
-      Each tracker adapter may supply default active and terminal state sets
-      appropriate to its provider.
-    fixed_semantics:
-      - Defaults apply only after an adapter is selected; operator-configured sets always win.
-    document:
-      - Each shipped adapter's default state sets.
+      - Which context identifies a log entry with a Work Item and a session.
+      - Where logs are written and how they are rotated.
+      - How sensitive values are kept out of logs.

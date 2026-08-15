@@ -1,390 +1,394 @@
-# Operator contract. Keys are reference names used by this document; concrete
-# spellings, formats, and defaults are implementation-defined unless stated.
-# All parameters live in the workflow document and hot-reload per the
-# configuration chapter unless noted otherwise.
 parameters:
-  - id: parameter.polling-interval
-    name: Poll interval
-    key: polling.interval_ms
+  - id: parameter.work-source-selection
+    name: Work source selection
+    key: work-source.selection
     controls: >
-      How often the scheduler runs a poll cycle (reconcile plus dispatch).
+      Which Work Source is read and which collection of work is in scope.
     semantics:
-      - Must be a positive duration.
-      - Each completed cycle schedules the next one after this interval.
+      - Exactly one work source is effective at a time.
+      - Its scope bounds every read the scheduler makes.
+      - The subject does not start when the selection is absent or unsupported.
+      - Provider-specific settings belong to the selected source, not to the scheduler.
     reload: >
-      Changes apply when the next cycle schedules its successor, without restart.
+      A change takes effect from the next poll cycle. Runs already started are
+      unaffected until they are reconciled.
     constrains:
-      - interaction.poll-cycle
+      - interaction.poll-and-dispatch
+      - interaction.reconcile-claimed-items
+      - interface.work-source-adapter
 
-  - id: parameter.tracker-kind
-    name: Tracker kind
-    key: tracker.kind
+  - id: parameter.work-source-credential
+    name: Work source credential
+    key: work-source.credential
     controls: >
-      Which tracker adapter the orchestrator uses.
+      The secret the subject presents when reading the Work Source and executing
+      provider-native tools.
     semantics:
-      - Must name an adapter in the implementation's registry.
-      - Absent or unknown kinds fail configuration validation.
+      - The credential may be supplied indirectly through the environment.
+      - Every environment name that carries it is declared so it can be withheld from the agent.
+      - An absent credential is a configuration failure, not a read failure.
+    reload: >
+      A change takes effect on the next read. Sessions keep the credential bound when
+      they started.
     constrains:
-      - interface.tracker-adapter
-      - interaction.load-config
+      - interaction.poll-and-dispatch
+      - interaction.run-agent-session
+      - invariant.agent-environment-excludes-credentials
 
-  - id: parameter.tracker-provider
-    name: Tracker provider settings
-    key: tracker.provider
+  - id: parameter.active-states
+    name: Active states
+    key: scheduling.active-states
     controls: >
-      Provider-specific connection settings - endpoint, project scope,
-      credentials, assignee identity - owned by the selected adapter.
+      Which board states make a Work Item eligible for an Agent Run.
     semantics:
-      - Contents are adapter-defined; the adapter validates them at load time.
-      - Credential values may be environment references and resolve at load.
-      - Resolved credentials feed the adapter and its tools, never the agent environment.
+      - Only items in an active state are selected for dispatch.
+      - A claimed item that leaves the active states is released.
+      - A run whose item leaves the active states stops starting further turns.
+      - Matching ignores case and surrounding whitespace.
+    reload: >
+      A change takes effect from the next poll cycle and applies to existing claims
+      at the next reconciliation.
     constrains:
-      - interface.tracker-adapter
-      - invariant.secret-isolation
+      - interaction.poll-and-dispatch
+      - interaction.reconcile-claimed-items
+      - interaction.continue-or-conclude-run
 
-  - id: parameter.tracker-active-states
-    name: Active tracker states
-    key: tracker.active_states
+  - id: parameter.terminal-states
+    name: Terminal states
+    key: scheduling.terminal-states
     controls: >
-      The tracker state names that make an issue eligible for dispatch and
-      for turn continuation.
+      Which board states mean the work is over and its workspace may be reclaimed.
     semantics:
-      - Matched case-insensitively after trimming.
-      - Adapters may supply provider-appropriate defaults.
-      - An issue outside these states is never dispatched and stops continuing.
+      - An item in a terminal state is never dispatched.
+      - A claimed item reaching a terminal state has its run stopped and workspace removed.
+      - "Terminal is stronger than non-active: only terminal removes the workspace."
+      - Items already terminal at startup have their workspaces reclaimed.
+    reload: >
+      A change takes effect from the next poll cycle.
     constrains:
-      - interaction.poll-cycle
-      - interaction.dispatch-issue
-      - interaction.agent-run
+      - interaction.reconcile-claimed-items
+      - interaction.release-claim-and-clean-up
+      - interaction.poll-and-dispatch
 
-  - id: parameter.tracker-terminal-states
-    name: Terminal tracker states
-    key: tracker.terminal_states
+  - id: parameter.required-labels
+    name: Required labels
+    key: scheduling.required-labels
     controls: >
-      The tracker state names that mean an issue is finished and its
-      workspace reclaimable.
+      Which labels a Work Item must carry before this deployment will work on it.
     semantics:
-      - Matched case-insensitively after trimming.
-      - A terminal issue's agent stops, its claim releases, and its workspace is removed.
-      - Adapters may supply provider-appropriate defaults.
+      - An item must carry every configured label to be dispatched.
+      - An item that loses a required label has its run stopped and its claim released.
+      - Matching ignores case and surrounding whitespace.
+      - An empty list imposes no label requirement.
+      - A blank configured label matches no item.
+    reload: >
+      A change takes effect from the next poll cycle and applies to existing claims
+      at the next reconciliation.
     constrains:
-      - interaction.reconcile-claims
-      - interaction.cleanup-workspace
+      - interaction.poll-and-dispatch
+      - interaction.reconcile-claimed-items
+      - invariant.claim-follows-eligibility
 
-  - id: parameter.tracker-required-labels
-    name: Required routing labels
-    key: tracker.required_labels
+  - id: parameter.poll-interval
+    name: Poll interval
+    key: scheduling.poll-interval
     controls: >
-      Labels an issue must carry (all of them) to be routed to this
-      orchestrator.
+      How long the scheduler waits between poll cycles.
     semantics:
-      - Matched case-insensitively after trimming.
-      - An empty list requires nothing.
-      - Losing a required label mid-run stops the agent and releases the claim.
+      - It bounds how quickly new work is noticed.
+      - It bounds how quickly a claim reacts to a board change.
+      - An operator may request an earlier cycle without changing the interval.
+      - The value must be positive.
+    reload: >
+      A change takes effect when the next cycle is scheduled.
     constrains:
-      - interaction.dispatch-issue
-      - interaction.reconcile-claims
+      - interaction.poll-and-dispatch
+      - interaction.reconcile-claimed-items
+
+  - id: parameter.max-concurrent-runs
+    name: Maximum concurrent runs
+    key: capacity.max-concurrent-runs
+    controls: >
+      How many Agent Runs may be active at once across the whole deployment.
+    semantics:
+      - Dispatch stops when the limit is reached and resumes when a run ends.
+      - Items deferred by the limit stay eligible for a later cycle.
+      - A retry is subject to the same limit as a first dispatch.
+      - The value must be positive.
+    reload: >
+      A change takes effect from the next dispatch decision. Runs already active are
+      not stopped to satisfy a lowered limit.
+    constrains:
+      - interaction.poll-and-dispatch
+      - invariant.concurrency-limits-respected
+
+  - id: parameter.max-concurrent-runs-by-state
+    name: Maximum concurrent runs per board state
+    key: capacity.max-concurrent-runs-by-state
+    controls: >
+      How many Agent Runs may be active at once for Work Items in a given board state.
+    semantics:
+      - A state without an entry falls back to the global limit.
+      - Both the per-state limit and the global limit must permit a dispatch.
+      - State names are matched case-insensitively after trimming.
+      - Each configured limit must be a positive integer.
+    reload: >
+      A change takes effect from the next dispatch decision.
+    constrains:
+      - interaction.poll-and-dispatch
+      - invariant.concurrency-limits-respected
+
+  - id: parameter.max-turns-per-run
+    name: Maximum turns per run
+    key: capacity.max-turns-per-run
+    controls: >
+      How many Turns one Agent Run may start while its Work Item stays active.
+    semantics:
+      - The run ends when the budget is exhausted, even if the item is still active.
+      - Ending on an exhausted budget returns control to the scheduler with the claim held.
+      - The value must be positive.
+    reload: >
+      A change takes effect for runs that start afterwards.
+    constrains:
+      - interaction.continue-or-conclude-run
+      - invariant.turn-budget-bounded
+
+  - id: parameter.max-retry-delay
+    name: Maximum retry delay
+    key: recovery.max-retry-delay
+    controls: >
+      The ceiling on the growing delay between attempts for one Claim.
+    semantics:
+      - The delay grows with consecutive failures and never exceeds this ceiling.
+      - The ceiling bounds how long recovery can take after a transient failure.
+      - The value must be positive.
+    reload: >
+      A change takes effect when the next retry is scheduled.
+    constrains:
+      - interaction.retry-after-failure
+      - invariant.retry-backoff-bounded
+
+  - id: parameter.stall-timeout
+    name: Stall timeout
+    key: recovery.stall-timeout
+    controls: >
+      How long a run may go without observable agent activity before it is restarted.
+    semantics:
+      - Silence is measured from the last observed agent activity.
+      - A run with no activity yet is measured from when it started.
+      - A run awaiting operator input is blocked rather than restarted.
+      - A value of zero disables stall detection entirely.
+    reload: >
+      A change takes effect at the next poll cycle.
+    constrains:
+      - interaction.detect-stalled-run
+      - failure.run-stalled
 
   - id: parameter.workspace-root
     name: Workspace root
     key: workspace.root
     controls: >
-      The directory under which every per-issue workspace lives; the local
-      blast radius granted to agents.
+      The directory beneath which every Workspace must live.
     semantics:
-      - Relative values resolve against the workflow document's directory.
-      - May be an environment reference.
-      - All workspace creation and removal is contained under this root.
+      - Every workspace path is verified to resolve inside this root.
+      - The root itself is never used as a workspace and never removed.
+      - A relative value resolves against the Workflow Definition's own location.
+      - The value may be supplied indirectly through the environment.
+    reload: >
+      A change takes effect for workspaces prepared afterwards. Existing workspaces
+      are not moved.
     constrains:
-      - interaction.create-workspace
+      - interaction.prepare-workspace
       - invariant.workspace-containment
 
-  - id: parameter.max-concurrent-agents
-    name: Global concurrency cap
-    key: agent.max_concurrent_agents
+  - id: parameter.workspace-hooks
+    name: Workspace lifecycle hooks
+    key: workspace.hooks
     controls: >
-      The maximum number of agent runs executing concurrently.
+      Operator-supplied commands run at workspace creation, before a run, after a
+      run, and before removal.
     semantics:
-      - Must be a positive integer.
-      - Admission never exceeds it; deferred issues stay eligible.
+      - Each hook runs with the Workspace as its working directory.
+      - The creation hook runs only on the run that created the directory.
+      - Creation and pre-run hook failures fail the run.
+      - Post-run and removal hook failures are advisory.
+      - Every hook is bounded by the hook timeout.
     reload: >
-      Re-read every poll cycle; new admissions honor the new value.
+      A change takes effect at the next hook invocation.
     constrains:
-      - interaction.dispatch-issue
-      - invariant.concurrency-caps
-
-  - id: parameter.max-concurrent-by-state
-    name: Per-state concurrency caps
-    key: agent.max_concurrent_agents_by_state
-    controls: >
-      Optional per-tracker-state overrides of the concurrency cap.
-    semantics:
-      - Keys are state names, matched case-insensitively; values are positive integers.
-      - A state without an override uses the global cap.
-    constrains:
-      - interaction.dispatch-issue
-      - invariant.concurrency-caps
-
-  - id: parameter.max-turns
-    name: Turn budget per run
-    key: agent.max_turns
-    controls: >
-      How many turns one agent run may execute before returning control to
-      the scheduler.
-    semantics:
-      - Must be a positive integer.
-      - Reaching the budget with the issue still active ends the run normally.
-    constrains:
-      - interaction.agent-run
-      - invariant.turn-bound
-
-  - id: parameter.max-retry-backoff
-    name: Maximum retry backoff
-    key: agent.max_retry_backoff_ms
-    controls: >
-      The upper bound on the delay between consecutive failure retries of one
-      issue.
-    semantics:
-      - Must be a positive duration.
-      - Failure retry delays grow up to and never beyond this value.
-    constrains:
-      - interaction.retry-issue
-      - invariant.bounded-backoff
-
-  - id: parameter.codex-command
-    name: Agent runtime command
-    key: codex.command
-    controls: >
-      The command line that launches the coding-agent runtime for each
-      session.
-    semantics:
-      - Must be non-blank.
-      - Runs with the workspace as working directory on the run's execution target.
-      - Operator-supplied arguments pass through to the runtime.
-    constrains:
-      - interface.agent-session-protocol
-
-  - id: parameter.approval-policy
-    name: Approval policy
-    key: codex.approval_policy
-    controls: >
-      How mid-turn approval requests are answered.
-    semantics:
-      - A dedicated auto-approve value grants approvals for the session automatically.
-      - Any other policy turns approval requests into blocking outcomes.
-      - Structured policy values pass through to the runtime unchanged.
-    constrains:
-      - interaction.handle-approvals
-
-  - id: parameter.thread-sandbox
-    name: Session sandbox mode
-    key: codex.thread_sandbox
-    controls: >
-      The sandbox mode declared for the whole agent session.
-    semantics:
-      - Passed to the runtime at session start.
-    constrains:
-      - interface.agent-session-protocol
-
-  - id: parameter.turn-sandbox-policy
-    name: Turn sandbox policy
-    key: codex.turn_sandbox_policy
-    controls: >
-      The filesystem and network policy applied to each turn.
-    semantics:
-      - When set, the operator's structured policy passes through unchanged.
-      - When unset, a default policy grants write access to the workspace only.
-      - The default's workspace path is canonicalized for local runs.
-    constrains:
-      - interface.agent-session-protocol
-      - interaction.agent-run
-
-  - id: parameter.turn-timeout
-    name: Turn inactivity timeout
-    key: codex.turn_timeout_ms
-    controls: >
-      How long a turn may stay silent before it is failed.
-    semantics:
-      - Must be a positive duration.
-      - Resets on every received stream event.
-    constrains:
-      - interaction.agent-run
-      - failure.turn-timeout
-
-  - id: parameter.read-timeout
-    name: Control response timeout
-    key: codex.read_timeout_ms
-    controls: >
-      How long the client waits for a direct protocol response during session
-      setup.
-    semantics:
-      - Must be a positive duration.
-      - Expiry fails the pending control operation.
-    constrains:
-      - interface.agent-session-protocol
-
-  - id: parameter.stall-timeout
-    name: Stall timeout
-    key: codex.stall_timeout_ms
-    controls: >
-      How long a running agent may go without observable session activity
-      before stall recovery acts.
-    semantics:
-      - Zero or negative disables stall detection.
-      - Expiry triggers restart-with-backoff, or blocking when input was requested.
-    constrains:
-      - interaction.stall-detection
-
-  - id: parameter.hook-after-create
-    name: Bootstrap hook
-    key: hooks.after_create
-    controls: >
-      The shell command that initializes a newly created workspace (for
-      example, cloning the repository).
-    semantics:
-      - Runs only when the workspace directory was newly created.
-      - Failure or timeout removes the fresh workspace and fails provisioning.
-    constrains:
-      - interaction.create-workspace
-
-  - id: parameter.hook-before-run
-    name: Pre-run hook
-    key: hooks.before_run
-    controls: >
-      The shell command run in the workspace before each agent session
-      starts.
-    semantics:
-      - Failure aborts the run before any session starts.
-    constrains:
-      - interaction.agent-run
-
-  - id: parameter.hook-after-run
-    name: Post-run hook
-    key: hooks.after_run
-    controls: >
-      The shell command run in the workspace after each agent run, on every
-      exit path.
-    semantics:
-      - Failures are logged and ignored.
-    constrains:
-      - interaction.agent-run
-
-  - id: parameter.hook-before-remove
-    name: Pre-removal hook
-    key: hooks.before_remove
-    controls: >
-      The shell command run in the workspace before it is removed (for
-      example, salvaging artifacts).
-    semantics:
-      - Failure or timeout never prevents the removal.
-    constrains:
-      - interaction.cleanup-workspace
+      - interaction.prepare-workspace
+      - interaction.release-claim-and-clean-up
+      - interface.workspace-hooks
 
   - id: parameter.hook-timeout
     name: Hook timeout
-    key: hooks.timeout_ms
+    key: workspace.hook-timeout
     controls: >
-      The shared execution timeout for every workspace hook.
+      How long any single hook may run before it is abandoned.
     semantics:
-      - Must be a positive duration.
-      - A timed-out hook is terminated and treated as failed per its hook point.
+      - A hook exceeding the timeout is abandoned and treated as failed.
+      - The timeout applies to every hook, local or remote.
+      - The value must be positive.
+    reload: >
+      A change takes effect at the next hook invocation.
     constrains:
       - interface.workspace-hooks
+      - failure.hook-failed
 
-  - id: parameter.prompt-template
-    name: Prompt template
-    key: workflow.prompt_template
+  - id: parameter.agent-command
+    name: Agent runtime command
+    key: agent.command
     controls: >
-      The template rendered into each run's first-turn prompt; the operator's
-      entire tracker-workflow policy for the agent lives here.
+      Which agent runtime is launched for an Agent Session and how it is invoked.
     semantics:
-      - Receives every issue field and the attempt number.
-      - Rendering is strict; unknown variables fail the run.
-      - Blank templates fall back to a documented built-in default.
+      - The runtime is launched with the run's Workspace as its working directory.
+      - The value must be present and non-blank.
+      - The launched runtime must speak the session protocol the subject expects.
+    reload: >
+      A change takes effect for sessions started afterwards.
     constrains:
-      - interaction.agent-run
-      - interface.workflow-document
+      - interaction.run-agent-session
+      - interface.agent-session
 
-  - id: parameter.ssh-hosts
-    name: Worker hosts
-    key: worker.ssh_hosts
+  - id: parameter.agent-prompt
+    name: Work prompt template
+    key: agent.prompt-template
+    controls: >
+      What the agent is told about the Work Item at the start of a run.
+    semantics:
+      - The template may reference Work Item fields and the attempt number.
+      - An empty template selects a built-in default.
+      - A template that cannot be parsed fails the run.
+      - A continuation turn's instruction is not drawn from this template.
+    reload: >
+      A change takes effect for prompts rendered afterwards.
+    constrains:
+      - interface.prompt-template
+      - interaction.run-agent-session
+
+  - id: parameter.agent-approval-policy
+    name: Agent approval policy
+    key: agent.approval-policy
+    controls: >
+      Which agent requests the subject may answer on the operator's behalf.
+    semantics:
+      - A restrictive policy causes an unanswerable request to block the item.
+      - A permissive policy lets the subject answer approvals and continue the turn.
+      - The default is restrictive, so unattended approval is opt-in.
+    reload: >
+      A change takes effect for sessions started afterwards.
+    constrains:
+      - interaction.run-agent-session
+      - interaction.hold-blocked-item
+
+  - id: parameter.agent-sandbox-policy
+    name: Agent sandbox policy
+    key: agent.sandbox-policy
+    controls: >
+      What the agent may read, write, and reach while a Turn runs.
+    semantics:
+      - The default confines writes to the run's Workspace.
+      - Network access is off by default and enabled deliberately.
+      - An explicitly configured policy is passed to the runtime unchanged.
+      - A policy that permits writes outside the Workspace violates containment.
+    reload: >
+      A change takes effect for sessions started afterwards.
+    constrains:
+      - interaction.run-agent-session
+      - invariant.workspace-containment
+
+  - id: parameter.turn-silence-timeout
+    name: Turn silence timeout
+    key: agent.turn-silence-timeout
+    controls: >
+      How long one Turn may go without any agent message before it is abandoned.
+    semantics:
+      - Each agent message resets the interval.
+      - The timeout is not a cap on the total length of a Turn.
+      - The value must be positive.
+    reload: >
+      A change takes effect for turns started afterwards.
+    constrains:
+      - interface.agent-session
+      - failure.turn-failed
+
+  - id: parameter.protocol-read-timeout
+    name: Session startup response timeout
+    key: agent.startup-response-timeout
+    controls: >
+      How long the subject waits for the agent runtime to answer a startup exchange.
+    semantics:
+      - Exceeding it fails the session start rather than the whole subject.
+      - It is distinct from the timeout that governs turn silence.
+      - The value must be positive.
+    reload: >
+      A change takes effect for sessions started afterwards.
+    constrains:
+      - interaction.run-agent-session
+      - failure.session-start-failed
+
+  - id: parameter.observability-exposure
+    name: Runtime state exposure
+    key: observability.exposure
+    controls: >
+      Whether and how the Runtime State is presented to operators.
+    semantics:
+      - Runtime State is always derivable, whatever presentation is configured.
+      - Presentation cadence is operator-settable.
+      - Presentation must not delay scheduling.
+    reload: >
+      A change takes effect at the next presentation cycle.
+    constrains:
+      - interaction.publish-runtime-state
+      - interface.runtime-state
+
+  - id: parameter.worker-hosts
+    name: Remote worker hosts
+    key: workers.hosts
     conformance: extension
     controls: >
-      The remote worker hosts on which workspaces and agent sessions run.
+      Which remote execution locations may carry Agent Runs.
     semantics:
-      - An empty list means local execution.
-      - Each entry names one reachable execution target.
+      - An empty list means every run executes locally.
+      - A configured list makes every run execute on one of those locations.
+      - A run stays on the location chosen for it.
+      - The workspace root is interpreted on the chosen location.
+    reload: >
+      A change takes effect for runs dispatched afterwards. Running runs stay where
+      they are.
     constrains:
-      - interaction.remote-agent-run
+      - interaction.run-on-remote-worker
+      - invariant.run-does-not-hop-hosts
 
-  - id: parameter.per-host-cap
-    name: Per-host concurrency cap
-    key: worker.max_concurrent_agents_per_host
+  - id: parameter.max-runs-per-host
+    name: Maximum concurrent runs per host
+    key: workers.max-runs-per-host
     conformance: extension
     controls: >
-      The maximum concurrent agent runs on any single worker host.
+      How many Agent Runs one execution location may carry at once.
     semantics:
-      - Must be a positive integer when set; unset means unlimited per host.
-      - Host selection skips hosts at their cap; all-full defers dispatch.
+      - Dispatch is deferred when every configured location is at its share.
+      - The global limit still applies on top of the per-location share.
+      - An absent value imposes no per-location share.
+      - A configured value must be positive.
+    reload: >
+      A change takes effect from the next dispatch decision.
     constrains:
-      - interaction.remote-agent-run
-      - invariant.concurrency-caps
+      - interaction.run-on-remote-worker
+      - invariant.concurrency-limits-respected
 
-  - id: parameter.dashboard-enabled
-    name: Terminal dashboard toggle
-    key: observability.dashboard_enabled
+  - id: parameter.observability-service
+    name: Observability service endpoint
+    key: observability.service-endpoint
     conformance: extension
     controls: >
-      Whether the terminal status dashboard renders.
+      Whether the Runtime State is served over a network, and where it listens.
     semantics:
-      - Disabling stops rendering without affecting scheduling or the API.
+      - The service does not run unless an endpoint is configured.
+      - The bind address defaults to a loopback address.
+      - Enabling the service changes no scheduling behavior.
+    reload: >
+      A change takes effect when the service is next started.
     constrains:
-      - interaction.observe-status
-
-  - id: parameter.dashboard-refresh
-    name: Dashboard refresh cadence
-    key: observability.refresh_ms
-    conformance: extension
-    controls: >
-      The periodic re-render cadence of the terminal dashboard.
-    semantics:
-      - Must be a positive duration.
-    constrains:
-      - interaction.observe-status
-
-  - id: parameter.render-interval
-    name: Render coalescing interval
-    key: observability.render_interval_ms
-    conformance: extension
-    controls: >
-      The minimum spacing between dashboard renders when updates arrive
-      rapidly.
-    semantics:
-      - Must be a positive duration.
-      - Bursts of updates coalesce into one render per interval.
-    constrains:
-      - interaction.observe-status
-
-  - id: parameter.server-port
-    name: Observability server port
-    key: server.port
-    conformance: extension
-    controls: >
-      The TCP port for the HTTP observability surface.
-    semantics:
-      - Unset disables the HTTP surface entirely.
-      - Zero requests an ephemeral port; the bound port is discoverable.
-      - An invocation-time override takes precedence over the document value.
-    constrains:
-      - interface.observability-api
-
-  - id: parameter.server-host
-    name: Observability bind host
-    key: server.host
-    conformance: extension
-    controls: >
-      The address the HTTP observability surface binds to.
-    semantics:
-      - Defaults to a loopback-only bind.
-    constrains:
-      - interface.observability-api
+      - interface.observability-service
+      - interaction.publish-runtime-state
