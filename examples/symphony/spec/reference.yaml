@@ -1,30 +1,40 @@
 reference_implementation:
   normative: false
-  summary: >
-    The Elixir application under elixir/ in the openai/symphony repository,
-    pinned at commit 8001b52e3062495a16e520e4ceaf8f9de868c4d0 (2026-08-12).
-    All evidence citations in spec/evidence.yaml resolve against this
-    revision, relative to the elixir/ directory. It is one realization of
-    this specification and adds no requirements.
   anchor:
     repository: https://github.com/openai/symphony
-    revision: 8001b52e3062495a16e520e4ceaf8f9de868c4d0
-    path_root: elixir/
+    revision: 8001b52
+    subtree: elixir/
+    note: >
+      All evidence-register source locations are relative to this repository at this
+      revision. The recovery read the implementation, its tests, and its own
+      documentation. It did not read any prior specification of this subject.
+  summary: >
+    The reference implementation is an Elixir/OTP service that polls an issue tracker,
+    creates a workspace per issue, launches a Codex app-server session inside it, and
+    keeps that session working until the issue leaves the active set. It is one
+    realization of this specification and adds no normative requirements.
   mapping:
-    - Scheduler -> SymphonyElixir.Orchestrator (GenServer holding the claim ledger).
-    - Configuration Authority -> SymphonyElixir.WorkflowStore, SymphonyElixir.Workflow, SymphonyElixir.Config and Config.Schema.
-    - Agent Run Supervisor -> SymphonyElixir.AgentRunner under a Task.Supervisor.
-    - Agent Session Protocol Client -> SymphonyElixir.Codex.AppServer (Codex app-server JSON-RPC over stdio).
-    - Tracker Adapter -> SymphonyElixir.Tracker behaviour with Linear, GitHub, GitLab, Jira, Asana, and Memory adapters.
-    - Workspace Manager -> SymphonyElixir.Workspace with SymphonyElixir.PathSafety.
-    - Observability Surface -> SymphonyElixir.StatusDashboard (terminal) and SymphonyElixirWeb (Phoenix LiveView dashboard and JSON API).
-    - Remote execution -> SymphonyElixir.SSH wrapping the system OpenSSH client.
+    - responsibility: responsibility.scheduler
+      realization: A single supervised GenServer holding claims, retries, and blocked entries in memory.
+    - responsibility: responsibility.run-supervisor
+      realization: A supervised task per issue that owns workspace, session, and turn loop.
+    - responsibility: responsibility.workspace-manager
+      realization: A module that canonicalizes paths before creating, using, or deleting them.
+    - responsibility: responsibility.configuration-store
+      realization: A store that re-reads the workflow document and keeps the last valid settings.
+    - responsibility: responsibility.work-source-adapter
+      realization: A behaviour with adapters for several hosted trackers and an in-memory one.
+    - responsibility: responsibility.session-client
+      realization: A JSON-RPC client speaking to the agent runtime over its standard streams.
+    - responsibility: responsibility.observability-publisher
+      realization: A terminal dashboard plus an optional web service over the same snapshot.
   reference_specific_choices:
-    - Elixir/OTP supervision, GenServer timers, and Task monitors as the concurrency substrate.
-    - Markdown-with-YAML-front-matter document syntax and Liquid (Solid) prompt templating.
-    - Ecto embedded schemas for settings validation.
-    - Codex app-server as the agent runtime and its JSON-RPC dialect.
-    - Phoenix, Bandit, and LiveView for the HTTP observability surface, with embedded static assets.
-    - Burrito/escript packaging and the exact CLI flag spellings.
-    - Repository development tooling (mix specs.check, mix pr_body.check, mix workspace.before_remove) that supports the shipped WORKFLOW.md but is not part of the orchestrator contract.
-    - The shipped WORKFLOW.md prompt encoding one team's Linear workflow policy.
+    - The Workflow Definition is a Markdown file with a YAML front matter section.
+    - The work source adapters target specific hosted trackers.
+    - The agent runtime is Codex in app-server mode over JSON-RPC on standard streams.
+    - Remote execution uses SSH, and the workspace root is interpreted on the remote host.
+    - Runtime state is held in memory, so a restart clears blocked entries.
+    - Concrete defaults such as the poll interval and the stall timeout.
+    - The retry delay doubles from a fixed base until it reaches the configured ceiling.
+    - The observability service is a Phoenix application with a live view and a JSON API.
+    - Startup requires an explicit acknowledgement flag before the agent is run unattended.

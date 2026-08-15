@@ -1,192 +1,295 @@
 interfaces:
-  - id: interface.workflow-document
-    name: Workflow Document
+  - id: interface.work-source-adapter
+    name: Work Source Adapter Interface
     purpose: >
-      The single operator artifact carrying both the structured settings and
-      the prompt template for one orchestrator instance.
+      The only boundary through which the scheduler learns about work. It hides every
+      provider-specific query, identifier, and capability.
     input_semantics:
-      - One document combines structured settings and a prompt-template body.
-      - Settings group by area; unknown areas and absent optional fields take documented defaults.
-      - String values may reference environment variables; references resolve at load time.
-      - Secret values resolve from provider-conventional environment fallbacks when unset.
-      - The prompt template receives every issue field plus the attempt number.
-      - Template rendering is strict; referencing an unknown variable is an error.
+      - A read by state names returns every item currently in any of those states.
+      - A read by item identities returns the current form of those items.
+      - An empty state list or empty identity list is a no-op that returns nothing.
+      - Reads are scoped to the one collection of work named in the configuration.
     output_semantics:
-      - Loading yields validated settings plus the effective prompt template.
-      - A blank template yields a documented built-in default prompt.
+      - Every returned record is a fully normalized Work Item.
+      - A record missing a required Work Item field is dropped, never returned partially formed.
+      - An item absent from a read by identity means it is no longer visible in scope.
+      - The dispatchable flag carries the provider's readiness verdict only.
+      - Labels are compared case-insensitively after trimming.
+      - Unparsable priorities and timestamps become absent rather than wrong values.
     failure_semantics:
-      - A missing document, a parse failure, or an invalid field is a load failure with a reason.
-      - Settings that decode to a non-map structure are rejected.
-      - A template parse or render failure fails the agent run that needed the prompt.
+      - A read failure is reported as a failure, never as an empty result.
+      - Configuration, authentication, transport, and response failures are distinguishable.
+      - A rate-limit response is distinguishable from other response failures.
+      - A pagination failure is distinguishable from a payload failure.
     implementation_defined:
-      - The document's concrete syntax (the reference uses Markdown with YAML front matter).
-      - Concrete setting names and nesting (this specification fixes semantics via parameter keys).
-      - The template language (the reference uses Liquid-style templates).
+      - The provider and its query language.
+      - How scope is expressed for that provider.
+      - Which native identifier becomes the Work Item identity.
+      - Whether reads are paginated and how.
     examples:
-      - title: Minimal front matter plus prompt (reference syntax)
-        lang: markdown
+      - title: Normalized Work Item returned by a read
+        lang: yaml
         body: |
-          ---
+          id: "9f1c1e40-1b0a-4b0f-9b1e-2f2a6d0a1c33"
+          identifier: "SYM-142"
+          title: "Recover the scheduler contract"
+          state: "In Progress"
+          labels: ["agent-ready"]
+          priority: 2
+          created_at: "2026-08-01T09:14:00Z"
+          blocked_by: []
+          dispatchable: true
+          url: "https://tracker.example/issue/SYM-142"
+    verification:
+      - Read with an empty state list and verify no provider request is made.
+      - Return a record without an identifier and verify it is dropped, not dispatched.
+      - Fail a read and verify a failure, not an empty list, reaches the scheduler.
+      - Rename a state's letter case and verify matching still succeeds.
+
+  - id: interface.workflow-definition
+    name: Workflow Definition Interface
+    purpose: >
+      The single document an operator edits to declare which work is orchestrated,
+      how runs behave, and what the agent is told.
+    input_semantics:
+      - The document carries a settings section and a prompt template section.
+      - Every omitted setting takes its default.
+      - A credential-valued setting may name an environment variable instead of a literal.
+      - A path-valued setting may name an environment variable instead of a literal.
+      - A relative workspace root resolves against the document's own location.
+      - An empty prompt template selects a built-in default template.
+    output_semantics:
+      - A document that validates becomes the effective configuration.
+      - The effective configuration is observable through the behavior it governs.
+      - The document is re-read while the subject runs.
+    failure_semantics:
+      - An unreadable or invalid document at startup prevents the subject from starting.
+      - An invalid document at reload leaves the previous configuration effective.
+      - A reload failure is reported and repeated until the document is fixed.
+    implementation_defined:
+      - The document's file name, format, and location.
+      - The spelling of each setting.
+      - The templating language of the prompt.
+      - How the document's changes are detected.
+    examples:
+      - title: A minimal definition, with the settings section first
+        lang: yaml
+        body: |
           tracker:
-            kind: linear
-            provider:
-              project_slug: "my-project"
+            kind: <work-source>
+            active_states: ["Todo", "In Progress"]
+            terminal_states: ["Done", "Cancelled"]
+            required_labels: ["agent-ready"]
           polling:
-            interval_ms: 5000
+            interval_ms: 30000
           workspace:
-            root: ~/code/agent-workspaces
+            root: ~/work/agent-workspaces
           hooks:
             after_create: |
-              git clone --depth 1 https://example.com/repo .
+              git clone --depth 1 "$SOURCE_REPO_URL" .
           agent:
             max_concurrent_agents: 10
             max_turns: 20
-          codex:
-            approval_policy: never
-          ---
-
-          You are working on ticket {{ issue.identifier }}: {{ issue.title }}
-          {% if attempt %}This is follow-up attempt #{{ attempt }}.{% endif %}
+          # prompt template follows the settings section
     verification:
-      - Load a document exercising defaults, environment references, and a template, and verify the resolved settings and rendered prompt.
-
-  - id: interface.cli
-    name: Service Invocation
-    purpose: >
-      How an operator starts one orchestrator instance against one workflow
-      document.
-    input_semantics:
-      - An optional workflow document path argument; absent, a documented default location applies.
-      - A mandatory explicit acknowledgement that agents run unattended without guardrails.
-      - Optional overrides for the log destination root and the observability server port.
-    output_semantics:
-      - On success the process runs until its supervision tree stops, then exits with a matching status.
-    failure_semantics:
-      - Missing acknowledgement prints a prominent warning banner and exits nonzero.
-      - A missing workflow file or invalid arguments print usage or the error and exit nonzero.
-    implementation_defined:
-      - The exact flag spellings and banner wording.
-      - The packaging (escript, release binary, or container entrypoint).
-    evidence:
-      - evidence.cli-guardrails
-      - evidence.test-guardrails
-    verification:
-      - Invoke without the acknowledgement and verify the banner and nonzero exit.
-      - Invoke with an explicit workflow path and verify that document is loaded.
-
-  - id: interface.tracker-adapter
-    name: Tracker Adapter Contract
-    purpose: >
-      The boundary every issue provider implements so the scheduler can stay
-      provider-agnostic.
-    input_semantics:
-      - Required read - fetch issues by a list of state names, normalized case-insensitively.
-      - Required read - fetch issues by a list of issue ids.
-      - Required - the list of secret environment variable names for the current settings.
-      - Optional - semantic validation of tracker settings at load time.
-      - Optional - provider-native agent tool specifications and execution (extension).
-    output_semantics:
-      - Reads return normalized Issues; malformed provider items are rejected, not passed through.
-      - The dispatchable verdict folds provider assignment, blocking relations, and readiness policy.
-      - An adapter is selected by the configured tracker kind from a documented registry.
-      - Adapters may supply provider-appropriate default active and terminal state sets.
-    failure_semantics:
-      - Reads return an error value on transport or provider failure; they never return partial guesses.
-      - An unsupported tracker kind is a configuration validation failure.
-    implementation_defined:
-      - The provider protocol, pagination, and rate handling behind each adapter.
-      - Which providers ship in the registry (the reference ships Linear, GitHub, GitLab, Jira, Asana, and an in-memory test adapter).
-    evidence:
-      - evidence.tracker-boundary
-      - evidence.issue-struct
-      - evidence.issue-identity
-    verification:
-      - Drive the scheduler against the in-memory adapter and verify identical scheduling behavior to a provider adapter.
-      - Feed a malformed provider item and verify it never reaches the scheduler.
-
-  - id: interface.agent-session-protocol
-    name: Agent Session Protocol
-    purpose: >
-      The conversation between the orchestrator and the coding-agent runtime
-      that hosts sessions and turns.
-    input_semantics:
-      - The runtime is launched with the workspace as working directory, using the operator-configured command.
-      - Session setup declares client identity, approval policy, sandbox mode, working directory, and the advertised dynamic tools.
-      - Each turn submits the prompt, a human-readable title, the approval policy, and the turn sandbox policy.
-      - The default turn sandbox policy grants write access to the workspace only; an explicit operator policy passes through unchanged.
-    output_semantics:
-      - The runtime streams line-delimited protocol messages; events carry method names and payloads.
-      - Turn completion, failure, and cancellation are distinct terminal turn events.
-      - Partial lines are buffered until terminated; non-protocol output is logged, never fatal.
-    failure_semantics:
-      - Control responses not received within the read timeout fail the operation.
-      - Turn inactivity past the turn timeout fails the turn.
-      - Runtime process exit mid-turn fails the turn with the exit status.
-    implementation_defined:
-      - The concrete protocol dialect and method names (the reference speaks the Codex app-server JSON-RPC dialect).
-      - The launch mechanism and stream transport.
-    evidence:
-      - evidence.app-server-protocol
-    verification:
-      - Verify session setup carries policy, sandbox, working directory, and tools, and each turn carries prompt and sandbox policy.
-      - Split a protocol message across stream chunks and verify correct reassembly.
-      - Verify malformed protocol-like lines are surfaced as malformed events without ending the turn.
+      - Omit every optional setting and verify documented defaults apply.
+      - Reference a credential through an environment variable and verify it resolves.
+      - Give a relative workspace root and verify it resolves against the document's location.
+      - Leave the prompt template empty and verify the default template is used.
 
   - id: interface.workspace-hooks
-    name: Workspace Lifecycle Hooks
+    name: Workspace Hook Interface
     purpose: >
-      Operator-supplied shell commands that run at workspace lifecycle
-      boundaries, giving the operator control over bootstrap and salvage.
+      The operator's opportunity to bootstrap, prepare, tidy, and drain a Workspace at
+      fixed points in a run's life.
     input_semantics:
-      - "Four hook points: after_create (bootstrap), before_run, after_run, and before_remove."
-      - Every hook runs with the workspace as working directory, through a shell, on the run's execution target.
-      - Hooks may be multi-line scripts.
-      - One shared operator-configured timeout bounds each hook execution.
+      - Every hook runs with the Workspace as its working directory.
+      - The creation hook runs only on the run that created the directory.
+      - The pre-run hook runs before each run's Agent Session starts.
+      - The post-run hook runs after each run's Agent Session ends.
+      - The removal hook runs before workspace content is deleted.
+      - Every hook is bounded by the configured hook timeout.
     output_semantics:
-      - Exit status zero is success; anything else is hook failure.
-      - Hook output is captured for logging, truncated to a bounded size.
+      - A hook that ends successfully allows the run to proceed.
+      - A successful removal hook allows deletion to proceed.
     failure_semantics:
-      - after_create failure aborts provisioning and removes the fresh workspace.
-      - before_run failure aborts the agent run before any session starts.
-      - after_run and before_remove failures are logged and ignored.
-      - A timed-out hook is terminated and treated as failed.
+      - A failing creation hook fails the run and discards the new workspace.
+      - A failing pre-run hook fails the run and keeps the workspace.
+      - A failing post-run hook does not change the run's outcome.
+      - A failing or timed-out removal hook does not prevent removal.
+      - A hook that exceeds the timeout is abandoned and treated as failed.
     implementation_defined:
-      - The shell and invocation details.
-      - How remote hook execution transports the script (extension).
-    evidence:
-      - evidence.workspace-hooks
-      - evidence.test-hooks
+      - The interpreter used to run hook commands.
+      - Which environment the hook inherits.
+      - How hook output is captured and truncated.
+    examples:
+      - title: Bootstrapping a fresh workspace
+        lang: yaml
+        body: |
+          hooks:
+            after_create: |
+              git clone --depth 1 "$SOURCE_REPO_URL" .
+            before_remove: |
+              ./scripts/drain-workspace.sh
+            timeout_ms: 60000
     verification:
-      - Verify each hook runs at its boundary with the workspace as working directory.
-      - Verify blocking hooks abort their operation on failure and non-blocking hooks do not.
-      - Verify a hook exceeding the timeout is terminated and handled per its blocking class.
+      - Fail the creation hook and verify the new workspace is discarded and the run fails.
+      - Fail the post-run hook and verify the run's outcome is unchanged.
+      - Fail the removal hook and verify removal still completes.
+      - Exceed the hook timeout and verify the hook is abandoned.
 
-  - id: interface.observability-api
-    name: Observability API and Dashboards
+  - id: interface.prompt-template
+    name: Work Prompt Interface
+    purpose: >
+      How a Work Item becomes the instruction the agent acts on, and how a
+      continuation Turn differs from the first one.
+    input_semantics:
+      - The template may reference any field of the Work Item.
+      - The template may reference the current attempt number.
+      - An unknown reference is an error, not an empty substitution.
+      - Structured field values are rendered in a stable textual form.
+    output_semantics:
+      - The first Turn of a run receives the rendered template.
+      - A continuation Turn receives instructions to resume, not to restart.
+      - A continuation Turn states its position within the run's turn budget.
+    failure_semantics:
+      - A template that cannot be parsed fails the run with the offending template reported.
+      - An unavailable Workflow Definition is reported separately from a parse failure.
+    implementation_defined:
+      - The templating syntax.
+      - The exact wording of the default and continuation prompts.
+      - The textual form chosen for structured values.
+    examples:
+      - title: A template referencing the work item and the attempt
+        lang: text
+        body: |
+          You are working on {{ issue.identifier }}.
+
+          Title: {{ issue.title }}
+          Current state: {{ issue.state }}
+
+          {% if attempt %}
+          This is follow-up attempt #{{ attempt }}. Resume from the workspace as it stands.
+          {% endif %}
+    verification:
+      - Reference an unknown field and verify rendering fails rather than substituting nothing.
+      - Render with an absent description and verify the default template still produces a prompt.
+      - Start a continuation turn and verify the prompt tells the agent to resume.
+
+  - id: interface.agent-session
+    name: Agent Session Interface
+    purpose: >
+      The boundary between the subject and the coding agent runtime: how a session
+      begins, how a Turn is run, and what the subject learns while it runs.
+    input_semantics:
+      - A session is started with a working directory, an approval policy, and a sandbox policy.
+      - A session is offered the provider-native tools available for it.
+      - A Turn is started with the rendered prompt and the item's identifying title.
+      - The subject answers approval requests only as the configured policy allows.
+    output_semantics:
+      - Each agent message becomes a timestamped update carrying its event kind.
+      - Updates identify the session so concurrent runs stay distinguishable.
+      - Updates may carry cumulative resource usage for the session.
+      - A Turn ends as completed, failed, cancelled, or awaiting operator input.
+    failure_semantics:
+      - A silent Turn is abandoned once the configured silence timeout elapses.
+      - The silence timeout is reset by each update, so it does not cap total Turn length.
+      - A protocol response that does not arrive within the read timeout fails the session start.
+      - An agent process that exits ends the Turn as a failure.
+      - Unparsable agent output is reported but does not end the Turn.
+    implementation_defined:
+      - The agent runtime and its wire protocol.
+      - How the agent process is launched and stopped.
+      - The names and shapes of approval and sandbox policies.
+      - Which policy value means "answer approvals automatically".
+    verification:
+      - Start a session and verify the declared working directory is used.
+      - Withhold updates past the silence timeout and verify the turn is abandoned.
+      - Emit updates steadily past the silence timeout and verify the turn continues.
+      - Exit the agent process mid-turn and verify the turn fails.
+
+  - id: interface.runtime-state
+    name: Runtime State Interface
+    purpose: >
+      The read model an operator or tool uses to see what is happening now, and the
+      one control it may exercise over timing.
+    input_semantics:
+      - A reader may request the whole current state.
+      - A reader may request the state of one Work Item by its identifier.
+      - A reader may request that the next poll happen sooner.
+    output_semantics:
+      - The state separates running, retrying, and blocked items.
+      - Each running entry reports its location, workspace, session, and progress.
+      - Each retrying entry reports its attempt number, due time, and failure reason.
+      - Each blocked entry reports when and why it blocked.
+      - The state reports whether a poll is in progress and when the next is due.
+      - Cumulative resource usage is reported per run and in total.
+      - An immediate-poll request reports whether it was coalesced into a pending cycle.
+    failure_semantics:
+      - An unknown Work Item identifier is reported as not found.
+      - A scheduler that does not answer in time is reported as a timeout.
+      - An absent scheduler is reported as unavailable.
+    implementation_defined:
+      - The transport and encoding of the read model.
+      - Field naming and the shape of each entry.
+      - The retention, if any, of past state.
+    verification:
+      - Query an item that is not orchestrated and verify a not-found result.
+      - Make the scheduler unresponsive and verify a timeout result rather than a hang.
+      - Request an immediate poll during a running cycle and verify coalescing is reported.
+
+  - id: interface.observability-service
+    name: Observability Service Interface
     conformance: extension
     purpose: >
-      The operator-facing HTTP surface and dashboards for orchestrator
-      status.
+      Serve the Runtime State over a network to operators and tools, when a
+      deployment chooses to expose it.
     input_semantics:
-      - A full-state query returns the current snapshot of running, retrying, and blocked claims plus totals.
-      - A per-issue query looks up one issue's status by its identifier.
-      - A refresh request asks the scheduler to poll immediately.
-      - A browser dashboard renders the same state live, self-contained without external assets.
-      - A terminal dashboard renders the same state in the service's terminal when enabled.
+      - The service is off unless the operator configures a listening port.
+      - The service exposes reading the whole state, reading one item, and requesting a poll.
+      - The bind address is operator-settable and defaults to a loopback address.
     output_semantics:
-      - Refresh acknowledges acceptance and reports whether it coalesced with an in-flight cycle.
-      - Responses expose claim phases, errors, blocking reasons, session telemetry, and poll countdown.
+      - Read requests answer with the same information as the Runtime State Interface.
+      - A poll request is acknowledged as accepted rather than as completed.
+      - A live view of the state may be offered in addition to the read model.
     failure_semantics:
-      - Unknown issue identifiers yield a not-found error.
-      - Unsupported methods on known routes yield a method-not-allowed error.
-      - Scheduler unavailability yields an explicit service-unavailable error.
+      - An unknown route is reported as not found.
+      - An unsupported method on a known route is reported as method not allowed.
+      - An unavailable scheduler is reported as a service-unavailable condition.
     implementation_defined:
-      - Route shapes, payload field names, and dashboard presentation.
-      - The bind address and port resolution beyond the operator parameters.
-    evidence:
-      - evidence.http-api
-      - evidence.dashboard
-      - evidence.test-observability
+      - The protocol, routes, and encoding.
+      - Whether a human-facing view is offered.
+      - Authentication, if any.
     verification:
-      - Exercise state, per-issue, refresh, unknown-issue, and wrong-method requests and verify the stated outcomes.
-      - Verify the dashboard updates when scheduler state changes without a viewer-driven poll.
+      - Leave the port unset and verify no service listens.
+      - Request an unknown route and verify a not-found response.
+      - Use an unsupported method on a known route and verify a method-not-allowed response.
+
+  - id: interface.agent-tool
+    name: Provider-Native Agent Tool Interface
+    conformance: extension
+    purpose: >
+      Let the agent operate on the board through the subject's credential, with a
+      declared argument shape and a structured result.
+    input_semantics:
+      - Each tool declares a name, a purpose, and the shape of its arguments.
+      - Arguments that do not satisfy the declared shape are rejected before execution.
+      - The credential and scope are bound when the session starts.
+    output_semantics:
+      - Every call returns a structured result stating success or failure.
+      - The result carries the provider's response or the reason it failed.
+      - Reach is limited by the configured credential, not by the scheduler's scope.
+    failure_semantics:
+      - An unknown tool returns a failure naming the supported tools.
+      - Malformed arguments return a failure explaining the expected shape.
+      - A missing credential returns a failure that names the missing setting.
+      - Provider errors are returned verbatim enough for the agent to react.
+      - No retry, deduplication, or rate-limit policy is applied on the agent's behalf.
+    implementation_defined:
+      - Which tools a given adapter offers.
+      - The argument schema of each tool.
+      - The encoding of the structured result.
+    verification:
+      - Call an unknown tool and verify a failure naming the supported tools.
+      - Call with malformed arguments and verify a structured failure result.
+      - Remove the credential and verify a failure that names the missing setting.

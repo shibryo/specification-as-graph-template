@@ -21,6 +21,7 @@ process:
     required_views:
       - concepts and relationships
       - responsibilities and ownership
+      - decomposition into layers (how the subject comes apart, stated once in reading order)
       - end-to-end interactions
       - lifecycle and state
       - interfaces
@@ -61,7 +62,8 @@ process:
       - Normative statements must constrain a model element or relationship rather than form an isolated inventory.
       - Interactions must connect participants, sequence, invariants, and failures where applicable.
       - Lifecycle records must express semantic state rather than incidental execution state.
-      - Behavior records must be grouped into subject-domain chapters when the subject spans more than one domain.
+      - Behavior records must be grouped into chapters cut by component, not by execution phase, when the subject spans more than one component.
+      - Chapters must expand the declared layers in declared order. No chapter may use a term a later chapter defines; vocabulary two components share is hoisted into the domain model instead of forcing an order. A chapter that only assembles other chapters' outputs follows the last chapter it takes an input from. Extension chapters sort after every core chapter.
       - Operator-tunable behavior that changes normative semantics must be recorded as a parameter constraining the records it governs; concrete defaults stay implementation-defined unless the value itself is contractual. Each parameter carries a stable reference key.
       - Concepts at data boundaries should carry typed field lists (attributes) so per-field facts — requiredness, ordering direction, comparison rules — are not lost in prose.
       - Extension records and chapters must be marked `conformance: extension`.
@@ -97,8 +99,9 @@ process:
     required_views:
       - system model overview
       - responsibility and ownership view
+      - abstraction levels (the declared decomposition, in reading order)
       - operator contract
-      - subject-domain chapters
+      - component chapters, expanding the declared layers in declared order
       - interaction narratives
       - lifecycle narrative
       - failure model
@@ -116,7 +119,8 @@ process:
       - Serve both reader models; every normative fact must be reachable through the scan path and the understanding path.
       - Open with a reading guide that routes each reader model to its path.
       - State the specification's provenance stance so readers know whether fixed mechanisms are deliberate contract or recovered observation.
-      - Project subject-domain chapters in declared order and place unassigned records in an appendix.
+      - Project component chapters in declared order and place unassigned records in an appendix.
+      - Number every subsection of a numbered section. Fold a structural subsection that ends up alone into its parent; never fold a list of records, where the heading carries a record's name.
       - Mark extension chapters and records so a reader can identify the omissible surface.
       - Assemble every verification clause into a single verification matrix grouped by chapter.
       - Do not add normative semantics that are absent from the source graph.

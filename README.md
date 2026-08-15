@@ -50,7 +50,7 @@ spec/
   failures.yaml
   implementation-defined.yaml
   reference.yaml
-  chapters.yaml        Optional subject-domain chapter layer
+  chapters.yaml        Optional chapter layer, cut by component
   parameters.yaml      Optional operator contract layer
   evidence.yaml        Optional evidence register (what the recovery used)
 examples/
@@ -107,7 +107,7 @@ make validate DIR=examples/symphony/spec
 make render   DIR=examples/symphony/spec
 ```
 
-The rendered `examples/symphony/SPEC.md` projects eight subject-domain chapters (configuration and reload; scheduling and dispatch; claim lifecycle, retry, and blocking; agent session execution; tracker adapter boundary; workspace provisioning and safety; and two optional extensions, remote execution and observability), each assembling its interactions, interfaces, lifecycle, invariants, and failure semantics in reading order. Compared against the project's own hand-written specification, the clean-room recovery reproduces its structure and operator contract, and additionally captures behavior the hand-written document lacks (the blocked-on-operator-input lifecycle state, symlink-escape workspace containment).
+The rendered `examples/symphony/SPEC.md` projects eight chapters — six core and two optional extensions — each assembling its interactions, interfaces, lifecycle, invariants, and failure semantics in reading order. Compared against the project's own hand-written specification, the clean-room recovery reproduces its structure and operator contract, and additionally captures behavior the hand-written document lacks (the blocked-on-operator-input lifecycle state, symlink-escape workspace containment).
 
 ## What a complete specification should make possible
 

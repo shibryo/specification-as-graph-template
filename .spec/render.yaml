@@ -10,6 +10,17 @@ render:
     - Prefer connected explanations over record-by-record dumps.
   chaptering:
     source: chapters.yaml
+    cut: >
+      Chapters are cut by component, not by execution phase, so that one
+      component is specified in one place.
+    order: >
+      Chapters expand the layers declared in model.yaml, in declared order.
+      No chapter uses a term a later chapter defines; shared vocabulary is
+      hoisted into the Core Domain Model. A chapter that only assembles other
+      chapters' outputs follows the last chapter it takes an input from.
+      Extension chapters sort after every core chapter. This is reading order:
+      build order belongs to the verification matrix and execution order to the
+      reference algorithms, and neither reshuffles the body.
     strategy: >
       Project declared chapters in order between the System Model and the
       implementation-freedom sections. Each chapter renders its overview
@@ -25,11 +36,14 @@ render:
       omitted entirely and that an implemented extension is normative in full.
   numbering: >
     Sections are numbered continuously in the style of hand-written
-    implementation-facing specifications. The front-half cuts (Problem
-    Statement; Goals and Non-Goals; System Overview with Main Components and
-    External Dependencies; Core Domain Model with Entities and Relationships)
-    are fixed so every specification generated from this template presents
-    the same analytical structure to the reader.
+    implementation-facing specifications, and every subsection of a numbered
+    section is numbered too, to three levels, so the document can cite itself.
+    A structural subsection left alone folds into its parent: a heading that
+    numbers one child divides nothing. A list of records never folds, because
+    its headings carry the records' names. The analytical front (Problem
+    Statement; Goals and Non-Goals; System Overview; Core Domain Model) is
+    fixed so every specification generated from this template opens the same
+    way; everything after it is positioned by the subject's own decomposition.
   sections:
     - title: Normative Language
       strategy: project_normative_language
@@ -38,7 +52,7 @@ render:
     - title: Goals and Non-Goals
       strategy: goals
     - title: System Overview
-      strategy: assemble_overview_components_and_dependencies
+      strategy: assemble_overview_components_layers_and_dependencies
     - title: Core Domain Model
       strategy: assemble_entities_and_relationships
     - title: Design Intent
