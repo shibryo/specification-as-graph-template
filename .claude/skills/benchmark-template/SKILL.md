@@ -4,9 +4,10 @@ description: >
   Improve this repository by benchmarking it. Clean-room recover a specification
   from an implementation, compare the rendered SPEC.md against that subject's
   authoritative hand-written specification, classify each difference by where it
-  has to be fixed, then fix it. Use when asked to improve or validate the
-  template, to run a benchmark recovery, or when a comparison against a
-  hand-written specification has surfaced gaps.
+  has to be fixed, take a human reading of the document before changing anything,
+  then fix and re-read. Use when asked to improve or validate the template, to run
+  a benchmark recovery, or when a comparison against a hand-written specification
+  has surfaced gaps.
 ---
 
 # Benchmarking the template
@@ -28,6 +29,9 @@ Hold these before anything else. Each one has already been got wrong.
 - **Judge by the rendered document.** A change is good when `SPEC.md` reads
   better, not when the graph looks tidier or the tooling gets cleverer. Read the
   rendered output before and after.
+- **A person is the only instrument for document quality.** Connectivity and
+  freshness are machine-checkable; whether the document is tiring, monotone, or
+  hollow is not. Phase 3 is a gate, not a courtesy.
 - **Never hand-edit `SPEC.md`.** If the document is wrong, the graph, the
   renderer, or the guidance is wrong. Fix that and re-render.
 - **Fix the cause, not the symptom.** A finding fixed only in one example leaves
@@ -98,7 +102,8 @@ point of this skill.
 
 Finish the phase properly: `validate` with **zero warnings**, then `render`, then
 **read the rendered document end to end**. A recovery you have not read is not
-evidence about anything.
+evidence about anything. Your reading prepares findings; it does not settle them.
+Phase 3 settles them.
 
 ## Phase 2 — Compare
 
@@ -129,7 +134,63 @@ Rows that get misclassified:
 - `deliberate` is where laziness hides. Justify it against the rendered document
   or reclassify it.
 
-## Phase 3 — Fix
+## Phase 3 — Human sensory evaluation (gate)
+
+**Stop here. Do not carry the ledger into Phase 4 on your own authority.**
+
+Everything the machinery can check, it has already checked. `validate` proves the
+graph connects. `check` proves nothing is stale. Neither can tell you the document
+is tiring to read, that every record lands with the same rhythm, that a heading
+promised something it did not deliver, or that a section reads like output rather
+than like a specification a person would keep maintaining. Those are perceptual
+judgements, and the only instrument for them is a person reading the document.
+
+Your own reading does not substitute. An agent evaluating prose it just produced
+is the weakest evaluator available, and fluent-but-flat is exactly the failure it
+cannot feel.
+
+### What to hand over
+
+- the rendered document, by path, with its size and roughly how long it takes to read;
+- what changed since they last saw it, if anything;
+- the difference ledger with your proposed disposition per row;
+- the rows you are least sure about, named, with why.
+
+### What to ask
+
+Ask for perception, not permission. "Does this look OK?" returns a yes and
+destroys the signal. Ask what only a reader can answer:
+
+- Where did you start skimming, and what made you start?
+- Where did you have to read something twice?
+- Does the tempo vary, or does every record land the same way?
+- Which section felt like filler written to fill a slot?
+- Read the exemplar's equivalent section. Which of the two reads like a document
+  a person would keep maintaining?
+- Which heading made you expect something you did not then get?
+- If you had to cut a fifth of it, what goes first?
+
+Do not argue a perception away. If a section reads as flat to a reader, it is
+flat. The open question is which layer made it flat.
+
+### What to do with the answers
+
+Each perception becomes a ledger row and is classified like any other finding.
+Where they usually land:
+
+- "reads flat", "no variation", "nothing to look at" → `renderer`, often with
+  `schema` behind it: the graph has no slot for the shape the content wants —
+  a table, a figure, a worked example;
+- "every section says the same kind of thing" → `guidance`: the records were
+  authored uniformly because nothing told the author to vary them;
+- "this heading is odd", "nobody writes this" → `renderer`, invented vocabulary;
+- "this part was a slog and I skipped it" → decide honestly between `renderer`
+  (projected badly) and `content` (genuinely too much said).
+
+A perception you cannot land in a layer is still a finding. Record it unclassified
+rather than dropping it.
+
+## Phase 4 — Fix
 
 One change ripples. Walk these layers in order every time, and say which ones the
 change does not touch rather than skipping them silently.
@@ -160,7 +221,7 @@ Invariants for repository changes:
 - **Do not drop a fact to match a shape.** When the hand-written spec's section is
   lighter than ours, relocate the surplus content, do not delete it.
 
-## Phase 4 — Verify
+## Phase 5 — Verify
 
 Run the full matrix over the template and every example:
 
@@ -186,11 +247,22 @@ Then run the checks that `check` cannot do:
 - **Self-description check.** Confirm the template's own `SPEC.md` demonstrates
   every new key.
 
+### Second sensory gate
+
+Then hand the changed document back. This pass is lighter than Phase 3 — give
+them the rendered diff and the sections it touched, and ask whether the document
+reads better, worse, or merely different.
+
+A fix that satisfies every row of the ledger and leaves the document worse to
+read is not finished. Ledger rows are a proxy; the reading is the thing they were
+a proxy for.
+
 ## Closing the run
 
 Report, in this order:
 
-1. the difference ledger with each row's disposition;
+1. the difference ledger with each row's disposition, including the rows that came
+   from the reader rather than from the comparison;
 2. what changed, by layer;
 3. rows deliberately left open, as named candidates for the next run.
 
