@@ -1,0 +1,192 @@
+concepts:
+  - id: concept.workflow-document
+    name: Workflow Document
+    meaning: >
+      The single operator-editable artifact that configures one orchestrator:
+      structured settings plus the prompt template handed to every agent run.
+      It is read at startup and re-read while the service runs.
+    attributes:
+      - name: settings
+        type: structured map
+        required: true
+        meaning: Operator settings grouped by area (tracker, polling, workspace, worker, agent, codex, hooks, observability, server).
+      - name: prompt_template
+        type: template text
+        required: false
+        meaning: Template rendered per run with issue fields and attempt number; a built-in default applies when blank.
+    properties:
+      - One document configures one orchestrator instance.
+      - Values may reference environment variables for secrets and paths.
+
+  - id: concept.issue
+    name: Issue
+    meaning: >
+      The normalized work item the scheduler operates on, produced by a
+      tracker adapter from provider data. It is the unit of claiming,
+      workspace assignment, and agent execution.
+    attributes:
+      - name: id
+        type: string
+        required: true
+        meaning: Stable dispatch identity within the configured tracker scope; the claim key.
+      - name: identifier
+        type: string
+        required: true
+        meaning: Human-readable identity, unique in scope; derives the workspace key.
+      - name: title
+        type: string
+        required: true
+        meaning: Short human summary; part of dispatch eligibility (must be present).
+      - name: description
+        type: string
+        required: false
+        meaning: Full body text made available to the prompt template.
+      - name: state
+        type: string
+        required: true
+        meaning: Provider workflow state name; compared case-insensitively against the configured active and terminal state sets.
+      - name: priority
+        type: integer
+        required: false
+        meaning: Provider priority; ranks 1 (highest) through 4; absent or out-of-range sorts last.
+      - name: created_at
+        type: timestamp
+        required: false
+        meaning: Creation time; older items dispatch first within a priority rank.
+      - name: labels
+        type: string list
+        required: false
+        meaning: Provider labels, matched case-insensitively against required routing labels.
+      - name: dispatchable
+        type: boolean
+        required: true
+        meaning: Adapter's verdict that this item is routed to this orchestrator (assignment, blockers, provider policy).
+      - name: blocked_by
+        type: list
+        required: false
+        meaning: Provider-side blocking relations the adapter folds into the dispatchable verdict.
+      - name: url
+        type: string
+        required: false
+        meaning: Human link surfaced in observability output.
+      - name: assignee_id
+        type: string
+        required: false
+        meaning: Provider assignee used for routing diagnostics.
+      - name: native_ref
+        type: map
+        required: false
+        meaning: Non-secret provider identifiers needed by provider-native agent tools.
+      - name: branch_name
+        type: string
+        required: false
+        meaning: Provider-suggested branch name exposed to the prompt template.
+      - name: updated_at
+        type: timestamp
+        required: false
+        meaning: Last provider update time, informational.
+
+  - id: concept.claim
+    name: Claim
+    meaning: >
+      The orchestrator's exclusive, in-memory ownership of one issue. A claim
+      is held while an agent runs, while a retry is pending, and while the
+      issue is blocked on operator input. It is the guard against duplicate
+      dispatch and it carries continuity data across attempts.
+    properties:
+      - At most one claim exists per issue id.
+      - A claim records attempt count, last error, worker host, and workspace path.
+      - A claim is released only when the tracker shows the issue terminal, inactive, unrouted, or gone.
+
+  - id: concept.workspace
+    name: Workspace
+    meaning: >
+      An isolated directory dedicated to one issue, in which every agent run
+      for that issue executes. Its location is derived deterministically from
+      the issue identifier under an operator-configured root.
+    properties:
+      - The same issue always maps to the same workspace path.
+      - The workspace persists across turns and retries so agents resume work in place.
+      - It is removed when the issue reaches a terminal tracker state.
+
+  - id: concept.agent-session
+    name: Agent Session
+    meaning: >
+      One live connection to a coding-agent runtime, bound to a workspace and
+      an issue. A session hosts one or more turns; each turn takes a prompt
+      and runs until completion, failure, cancellation, or timeout.
+    properties:
+      - A session is created per agent run and always torn down with it.
+      - Session policies (approval, sandbox) are fixed at session start.
+
+  - id: concept.session-event
+    name: Session Event
+    meaning: >
+      A timestamped notification emitted during a session: lifecycle events,
+      approval and input requests, tool calls, streamed output, and token
+      usage. Events drive stall detection, blocked classification, and
+      observability.
+    properties:
+      - Every event carries an event kind and a timestamp.
+      - Events may carry a session id, token usage, and rate-limit data.
+
+  - id: concept.worker-host
+    name: Worker Host
+    meaning: >
+      A remote execution target on which workspaces are provisioned and agent
+      sessions launched, addressed over an operator-configured transport.
+      Present only when the remote-execution extension is configured.
+    conformance: extension
+    properties:
+      - Each host has a bounded number of concurrent agent slots.
+      - An agent run is pinned to one host for its whole lifetime.
+
+relationships:
+  - subject: concept.workflow-document
+    relation: governs
+    object: concept.claim
+    meaning: >
+      Operator settings decide which issues may be claimed, how many run
+      concurrently, and how retries and blocking behave.
+
+  - subject: concept.claim
+    relation: owns
+    object: concept.issue
+    meaning: >
+      A claim asserts exclusive local ownership of one issue for the duration
+      of running, retrying, or blocked handling.
+
+  - subject: concept.issue
+    relation: maps_to
+    object: concept.workspace
+    meaning: >
+      Each issue deterministically maps to exactly one workspace per
+      execution target.
+
+  - subject: concept.agent-session
+    relation: executes_in
+    object: concept.workspace
+    meaning: >
+      Every session runs with the issue's workspace as its working directory
+      and writable scope.
+
+  - subject: concept.agent-session
+    relation: works_on
+    object: concept.issue
+    meaning: >
+      A session receives the issue's content in its prompt and continues only
+      while the issue remains active and routed here.
+
+  - subject: concept.agent-session
+    relation: emits
+    object: concept.session-event
+    meaning: >
+      Sessions stream events that the scheduler folds into claim telemetry
+      and blocked/stall decisions.
+
+  - subject: concept.worker-host
+    relation: hosts
+    object: concept.workspace
+    meaning: >
+      Under the remote-execution extension, a workspace is provisioned on the
+      worker host selected for the run.

@@ -1,0 +1,268 @@
+# Evidence register for the clean-room recovery. Sources are pinned to the
+# reference anchor in reference.yaml (openai/symphony @ 8001b52e). Paths are
+# relative to the repository's elixir/ directory.
+evidence:
+  - id: evidence.orchestrator-poll
+    kind: code
+    source: lib/symphony_elixir/orchestrator.ex:83-126 (handle_info :tick / :run_poll_cycle)
+    note: Poll cycle refreshes runtime config, reconciles, dispatches, and reschedules itself each interval.
+
+  - id: evidence.orchestrator-dispatch-guards
+    kind: code
+    source: lib/symphony_elixir/orchestrator.ex:816-905 (should_dispatch_issue?, candidate_issue?, state sets)
+    note: Dispatch requires well-formed fields, routable verdict, active non-terminal state, no existing claim, and free global/per-state/per-host slots.
+
+  - id: evidence.orchestrator-sort
+    kind: code
+    source: lib/symphony_elixir/orchestrator.ex:796-814 (sort_issues_for_dispatch)
+    note: Candidates order by priority rank 1-4 (else last), then created_at ascending, then identifier.
+
+  - id: evidence.orchestrator-reconcile
+    kind: code
+    source: lib/symphony_elixir/orchestrator.ex:310-520 (reconcile_running/blocked_issue_states)
+    note: Terminal state stops agent and cleans workspace; unrouted or non-active or missing stops/releases without cleanup; fetch errors keep everything.
+
+  - id: evidence.orchestrator-retry
+    kind: code
+    source: lib/symphony_elixir/orchestrator.ex:1034-1253 (schedule_issue_retry, retry_delay, handle_retry_issue)
+    note: Retry uses tokens against stale timers, exponential base doubling capped by agent.max_retry_backoff_ms, and a short continuation delay after normal exit.
+
+  - id: evidence.orchestrator-block
+    kind: code
+    source: lib/symphony_elixir/orchestrator.ex:208-254,659-779 (handle_agent_down, input_required_blocker?, block_issue_from_entry)
+    note: Agent exits and stalls with input-required signals move the claim to blocked instead of retrying; retry state is dropped and the claim held.
+
+  - id: evidence.orchestrator-stall
+    kind: code
+    source: lib/symphony_elixir/orchestrator.ex:581-657 (reconcile_stalled_running_issues)
+    note: Sessions idle past codex.stall_timeout_ms are restarted with backoff, or blocked when the last signal was an input request; timeout 0 disables.
+
+  - id: evidence.orchestrator-slots
+    kind: code
+    source: lib/symphony_elixir/orchestrator.ex:833-851,1281-1375 (state_slots_available?, select_worker_host, available_slots)
+    note: Global cap, per-state cap, and per-host cap gate dispatch; host selection prefers the recorded host, else the least-loaded host with capacity.
+
+  - id: evidence.orchestrator-revalidate
+    kind: code
+    source: lib/symphony_elixir/orchestrator.ex:906-1024 (refresh_issue_for_dispatch, revalidate_issue_for_dispatch)
+    note: Every dispatch refetches the issue by id and skips it when missing, terminal, unrouted, or otherwise no longer a candidate.
+
+  - id: evidence.orchestrator-startup-cleanup
+    kind: code
+    source: lib/symphony_elixir/orchestrator.ex:72,1160-1175 (run_terminal_workspace_cleanup)
+    note: At startup the orchestrator sweeps terminal-state issues and removes their workspaces.
+
+  - id: evidence.config-schema
+    kind: code
+    source: lib/symphony_elixir/config/schema.ex:43-302 (embedded schemas and defaults)
+    note: Full operator settings surface with defaults - tracker, polling, workspace, worker, agent, codex, hooks, observability, server.
+
+  - id: evidence.config-secrets
+    kind: code
+    source: lib/symphony_elixir/config/schema.ex:398-568 (finalize_settings, resolve_secret_setting, env_reference_name)
+    note: "$VAR references resolve from the environment for secrets and paths; Linear credentials fall back to LINEAR_API_KEY / LINEAR_ASSIGNEE."
+
+  - id: evidence.workflow-store
+    kind: code
+    source: lib/symphony_elixir/workflow_store.ex:65-181 (init, reload_state, load_state, current_stamp)
+    note: Startup stops on invalid config; change detection polls a file stamp; failed reloads log and keep the last known good state.
+
+  - id: evidence.workflow-parse
+    kind: code
+    source: lib/symphony_elixir/workflow.ex:63-114 (parse, split_front_matter)
+    note: One document splits into structured front matter (settings) and body (prompt template).
+
+  - id: evidence.agent-runner
+    kind: code
+    source: lib/symphony_elixir/agent_runner.ex:21-173 (run, run_codex_turns, continue_with_issue?)
+    note: Run creates the workspace, runs before_run (blocking) and after_run (always), starts one session, loops turns up to max_turns while the issue stays active and routable.
+
+  - id: evidence.agent-runner-affinity
+    kind: statement
+    source: lib/symphony_elixir/agent_runner.ex:23 (code comment)
+    note: "\"The orchestrator owns host retries so one worker lifetime never hops machines.\""
+
+  - id: evidence.tracker-boundary
+    kind: statement
+    source: lib/symphony_elixir/tracker.ex:2-8 (moduledoc)
+    note: The orchestrator depends only on read callbacks; agent-side mutations stay behind optional provider-native tools so capabilities do not leak into scheduler policy.
+
+  - id: evidence.tracker-bind
+    kind: statement
+    source: lib/symphony_elixir/tracker.ex:43-59 (bind_agent_tools doc and code)
+    note: Adapter, tracker settings, tool specs, and secret names are captured per session so advertisement and execution cannot drift across a workflow reload.
+
+  - id: evidence.issue-struct
+    kind: code
+    source: lib/symphony_elixir/tracker/issue.ex:12-66 (defstruct, routable?)
+    note: Normalized issue shape; routable requires dispatchable true and every required label present, case-insensitively.
+
+  - id: evidence.issue-identity
+    kind: statement
+    source: lib/symphony_elixir/tracker/issue.ex:2-10 (moduledoc)
+    note: id is the stable dispatch identity; identifier is the human-readable value that derives the workspace key and must be unique in scope.
+
+  - id: evidence.workspace-create
+    kind: code
+    source: lib/symphony_elixir/workspace.ex:13-91,289-329 (create_for_issue, ensure_workspace, after_create handling)
+    note: Existing directories are reused; non-directories replaced; after_create runs only on fresh creation and failure removes the partial workspace.
+
+  - id: evidence.workspace-key
+    kind: statement
+    source: lib/symphony_elixir/workspace.ex:259-287 (workspace_key doc and code)
+    note: Workspace key is deterministic per identifier and collision-safe; unsafe characters are replaced and a hash suffix disambiguates.
+
+  - id: evidence.workspace-validate
+    kind: code
+    source: lib/symphony_elixir/workspace.ex:461-510 (validate_local_workspace_path)
+    note: Paths are canonicalized; the root itself, symlink escapes, and paths outside the root are rejected with distinct errors.
+
+  - id: evidence.workspace-hooks
+    kind: code
+    source: lib/symphony_elixir/workspace.ex:219-459 (hook runners)
+    note: Hooks run via shell in the workspace with a shared timeout; before_run and after_create failures propagate; after_run and before_remove failures are ignored.
+
+  - id: evidence.app-server-protocol
+    kind: code
+    source: lib/symphony_elixir/codex/app_server.ex:275-401 (initialize, thread/start, turn/start, receive_loop)
+    note: JSON-RPC session over a line stream - initialize, thread start with approval policy, sandbox, cwd, dynamic tools, then turn start; turn timeout resets on activity.
+
+  - id: evidence.app-server-approvals
+    kind: code
+    source: lib/symphony_elixir/codex/app_server.ex:493-894 (handle_turn_method, maybe_handle_approval_request)
+    note: Under auto-approve policy, approval requests are approved for the session; otherwise they end the turn as approval_required; input and elicitation requests end the turn as input_required; tool calls are executed and answered inline.
+
+  - id: evidence.app-server-secrets
+    kind: code
+    source: lib/symphony_elixir/codex/app_server.ex:192-257 (start_port, tracker_secret_port_env, tracker_secret_unset_command)
+    note: Tracker secret environment names are removed from the agent child environment locally and unset in the remote launch command.
+
+  - id: evidence.ssh
+    kind: code
+    source: lib/symphony_elixir/ssh.ex:41-95 (ssh_args, parse_target)
+    note: Remote transport is the system ssh client; host:port shorthand is split; SYMPHONY_SSH_CONFIG selects a config file.
+
+  - id: evidence.cli-guardrails
+    kind: code
+    source: lib/symphony_elixir/cli.ex:8-58,111-150 (acknowledgement switch, banner)
+    note: Startup requires an explicit acknowledgement flag that the agent runs without guardrails; otherwise a warning banner prints and the process exits nonzero.
+
+  - id: evidence.http-api
+    kind: code
+    source: lib/symphony_elixir_web/router.ex:17-41 and lib/symphony_elixir_web/controllers/observability_api_controller.ex:12-62
+    note: HTTP surface - live dashboard at /, GET /api/v1/state, POST /api/v1/refresh (202), GET /api/v1/:issue_identifier (404 when unknown), 405 otherwise, 503 when unavailable.
+
+  - id: evidence.dashboard
+    kind: code
+    source: lib/symphony_elixir/status_dashboard.ex:83-127 (notify_update, init)
+    note: Terminal dashboard re-renders on pushed updates, throttled by a render interval; enable flag and refresh cadence come from observability settings.
+
+  - id: evidence.workflow-example
+    kind: doc
+    source: WORKFLOW.md:1-40 (shipped configuration artifact)
+    note: A production workflow document - front-matter settings plus a long prompt encoding the operator's tracker workflow policy.
+
+  - id: evidence.test-startup-preflight
+    kind: test
+    source: test/symphony_elixir/core_test.exs:249 ("orchestrator fails startup when semantic preflight fails")
+    note: Invalid configuration prevents the orchestrator from starting.
+
+  - id: evidence.test-last-good
+    kind: test
+    source: test/symphony_elixir/core_test.exs:297 and test/symphony_elixir/extensions_test.exs:86
+    note: Runtime keeps last good settings after an invalid reload; the store reloads changes and falls back when stopped.
+
+  - id: evidence.test-no-overlap
+    kind: test
+    source: test/symphony_elixir/core_test.exs:351 ("restarting the orchestrator does not overlap redispatched work")
+    note: Claims prevent duplicate concurrent agents on one issue across orchestrator restarts.
+
+  - id: evidence.test-reconcile
+    kind: test
+    source: test/symphony_elixir/core_test.exs:478-1004 (reconciliation suite)
+    note: Non-active stops the agent without cleanup; terminal stops and cleans; reassignment and label removal stop or release; missing issues stop the agent; retries release claims on label removal.
+
+  - id: evidence.test-retry-backoff
+    kind: test
+    source: test/symphony_elixir/core_test.exs:1022-1181 (retry suite)
+    note: Normal exit schedules a continuation check; abnormal exits back off progressively with a wait before the first retry; stale retry timers are ignored; refresh coalesces.
+
+  - id: evidence.test-hostcaps
+    kind: test
+    source: test/symphony_elixir/core_test.exs:1211-1242 (worker host selection suite)
+    note: Full hosts are skipped under the per-host cap; all-full yields no capacity; a preferred host with capacity is kept.
+
+  - id: evidence.test-dispatch-eligibility
+    kind: test
+    source: test/symphony_elixir/workspace_and_config_test.exs:682-853 (dispatch eligibility suite)
+    note: Priority-then-age ordering; provider-blocked, otherwise-assigned, and label-missing issues are ineligible; revalidation skips issues whose routing changed.
+
+  - id: evidence.test-workspace-safety
+    kind: test
+    source: test/symphony_elixir/workspace_and_config_test.exs:43-283 (workspace suite)
+    note: Deterministic paths per identifier; collision disambiguation; reuse without deletion; symlink escapes rejected; root removal rejected; roots canonicalized.
+
+  - id: evidence.test-hooks
+    kind: test
+    source: test/symphony_elixir/workspace_and_config_test.exs:283-374,865-989 (hook suite)
+    note: after_create failures and timeouts surface and clean the partial workspace; before_remove failure or timeout never aborts removal; multiline scripts run at lifecycle boundaries.
+
+  - id: evidence.test-per-state-caps
+    kind: test
+    source: test/symphony_elixir/workspace_and_config_test.exs:1301 ("config supports per-state max concurrent agent overrides")
+    note: Per-state concurrency overrides are honored, keyed case-insensitively.
+
+  - id: evidence.test-turnloop
+    kind: test
+    source: test/symphony_elixir/core_test.exs:1780,1912,1004 (turn loop suite)
+    note: Runs continue with follow-up turns while the issue stays active, stop at agent.max_turns, and stop when routing is lost.
+
+  - id: evidence.test-blocking
+    kind: test
+    source: test/symphony_elixir/orchestrator_status_test.exs:903-1173 (stall and blocking suite)
+    note: Stalled workers restart with backoff; stalls on elicitation block; input-required failures and normal exits after input-required both block instead of retrying.
+
+  - id: evidence.test-secrets
+    kind: test
+    source: test/symphony_elixir/app_server_test.exs:1397 ("app server does not pass tracker credentials to the local Codex child")
+    note: Tracker credentials are absent from the agent child environment.
+
+  - id: evidence.test-approvals
+    kind: test
+    source: test/symphony_elixir/app_server_test.exs:275-857 (approval and input suite)
+    note: Auto-approval under policy never; approval-required hard stop under safer defaults; freeform and option input prompts block; MCP elicitation blocks.
+
+  - id: evidence.test-turn-timeout
+    kind: test
+    source: test/symphony_elixir/app_server_test.exs:79 ("turn timeout resets on stream updates and fires after silence")
+    note: The turn timeout is an inactivity timeout.
+
+  - id: evidence.test-tool-binding
+    kind: test
+    source: test/symphony_elixir/dynamic_tool_test.exs:26-77 (binding suite)
+    note: Bound tools keep the adapter and auth snapshot from session startup; unsupported tools return a failure payload listing supported tools.
+
+  - id: evidence.test-observability
+    kind: test
+    source: test/symphony_elixir/orchestrator_status_test.exs:4-802 and test/symphony_elixir/extensions_test.exs:242-579
+    note: Snapshots reflect last session events, retry queue, poll countdown; API preserves state/refresh/404/405/timeout behavior; dashboard renders and refreshes over pubsub.
+
+  - id: evidence.test-token-accounting
+    kind: test
+    source: test/symphony_elixir/orchestrator_status_test.exs:278-716 (token accounting suite)
+    note: Cumulative usage payloads accumulate monotonically; non-cumulative deltas without totals are ignored; totals prefer authoritative cumulative fields.
+
+  - id: evidence.test-guardrails
+    kind: test
+    source: test/symphony_elixir/cli_test.exs:8 ("returns the guardrails acknowledgement banner when the flag is missing")
+    note: Startup without the acknowledgement flag fails with the banner.
+
+  - id: evidence.test-remote
+    kind: test
+    source: test/symphony_elixir/app_server_test.exs:1499, test/symphony_elixir/workspace_and_config_test.exs:1601, test/symphony_elixir/core_test.exs:1710
+    note: Sessions launch over ssh for remote workers; remote workspace lifecycle uses configured host aliases; ssh startup failures surface instead of silently hopping hosts.
+
+  - id: evidence.test-config-defaults
+    kind: test
+    source: test/symphony_elixir/workspace_and_config_test.exs:990-1592 (config suite)
+    note: Defaults for optional settings; $VAR resolution; per-adapter state defaults only after adapter selection; sandbox policy resolution and passthrough.

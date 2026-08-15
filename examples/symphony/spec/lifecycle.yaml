@@ -1,0 +1,61 @@
+# Lifecycle of a Claim: the orchestrator's ownership of one issue.
+initial_state: state.unclaimed
+terminal_states:
+  - state.released
+states:
+  - id: state.unclaimed
+    name: Unclaimed
+    meaning: >
+      The issue is visible in an active tracker state but this orchestrator
+      holds no claim on it. It competes for dispatch every poll cycle.
+  - id: state.running
+    name: Running
+    meaning: >
+      A claim is held and an agent run is executing in the issue's workspace.
+      The claim carries live telemetry from the session.
+  - id: state.awaiting-retry
+    name: Awaiting Retry
+    meaning: >
+      A claim is held with no live agent; a timer will re-validate and
+      re-dispatch the issue. Covers failure backoff, capacity waits, and the
+      continuation check after a normal run completion.
+  - id: state.blocked
+    name: Blocked
+    meaning: >
+      A claim is held because the agent needs operator input or approval.
+      No timer exists; only an observed tracker-state change releases it.
+  - id: state.released
+    name: Released
+    meaning: >
+      The claim is gone. The issue may re-enter as Unclaimed later if the
+      tracker makes it eligible again.
+transitions:
+  - from: state.unclaimed
+    to: state.running
+    trigger: Dispatch admits the issue after revalidation and takes the claim.
+  - from: state.running
+    to: state.awaiting-retry
+    trigger: The agent run exits abnormally, stalls without an input signal, or completes normally (continuation check).
+  - from: state.running
+    to: state.blocked
+    trigger: The run exits or stalls while the last session signal indicates required operator input or approval.
+  - from: state.running
+    to: state.released
+    trigger: Reconciliation observes the issue terminal, inactive, unrouted, or missing.
+  - from: state.awaiting-retry
+    to: state.running
+    trigger: The retry timer fires, revalidation passes, and capacity is free.
+  - from: state.awaiting-retry
+    to: state.awaiting-retry
+    trigger: The retry timer fires but capacity is exhausted or the refetch failed; a longer retry is scheduled.
+  - from: state.awaiting-retry
+    to: state.released
+    trigger: The retry-time refetch shows the issue terminal, inactive, unrouted, or missing.
+  - from: state.blocked
+    to: state.released
+    trigger: Reconciliation observes the blocked issue terminal, inactive, unrouted, or missing.
+normative:
+  - An issue holds at most one claim, in exactly one lifecycle state, at any time.
+  - Only fresh tracker state moves a claim into Released.
+  - Blocked never transitions directly back to Running; release and re-dispatch are required.
+  - Workspace removal accompanies release only when the observed tracker state is terminal.

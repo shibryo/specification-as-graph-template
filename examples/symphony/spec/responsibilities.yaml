@@ -1,0 +1,114 @@
+responsibilities:
+  - id: responsibility.config
+    name: Configuration Authority
+    purpose: >
+      Own the loading, validation, hot reload, and serving of the workflow
+      document so every other responsibility reads one consistent,
+      always-valid view of operator intent.
+    owns:
+      - Parsing the workflow document into settings and prompt template.
+      - Structural and semantic validation, including tracker-adapter validation.
+      - Detecting document changes and swapping in reloaded settings atomically.
+      - Retaining the last known good configuration when a reload fails.
+    must_not_own:
+      - Scheduling decisions made with the settings it serves.
+    normative:
+      - Settings served to readers MUST always come from a fully validated document.
+
+  - id: responsibility.scheduler
+    name: Scheduler
+    purpose: >
+      Own the claim ledger and the polling loop; decide when each issue is
+      dispatched, retried, blocked, reconciled, or released.
+    owns:
+      - The periodic poll cycle and immediate refresh requests.
+      - Claim admission, including all eligibility and capacity checks.
+      - Retry timers, backoff progression, and attempt accounting.
+      - Blocked-entry bookkeeping for issues awaiting operator input.
+      - Reconciling running and blocked claims against fresh tracker state.
+      - Selecting the execution target for each run.
+    must_not_own:
+      - Provider-specific issue interpretation; the adapter normalizes first.
+      - The content or conduct of an agent turn.
+    normative:
+      - The scheduler MUST NOT dispatch an issue it already holds a claim for.
+      - The scheduler MUST re-read runtime-tunable settings at least once per poll cycle.
+
+  - id: responsibility.agent-runner
+    name: Agent Run Supervisor
+    purpose: >
+      Own one agent run end to end: workspace readiness, lifecycle hooks,
+      the turn loop against a single session, and continuation decisions
+      based on fresh issue state.
+    owns:
+      - Ordering of workspace provisioning, hooks, session start, and teardown.
+      - The per-run turn loop and its turn budget.
+      - Re-checking issue state and routing between turns.
+    must_not_own:
+      - Retry scheduling and host selection; the scheduler decides both.
+    normative:
+      - A run MUST release its session and run teardown hooks on every exit path.
+
+  - id: responsibility.codex-client
+    name: Agent Session Protocol Client
+    purpose: >
+      Own the wire conversation with the coding-agent runtime: session and
+      turn setup, event streaming, approval and input-request handling, and
+      tool-call brokering.
+    owns:
+      - Encoding session policies (approval, sandbox, working directory) at session start.
+      - Classifying mid-turn requests as auto-approvable, tool calls, or operator-input blockers.
+      - Enforcing response and turn timeouts on the stream.
+      - Withholding tracker secrets from the agent process environment.
+    must_not_own:
+      - Deciding whether a blocked issue is later released; the scheduler owns claims.
+    normative:
+      - A turn that requires operator input MUST end as a distinguishable blocker, not as a generic failure.
+
+  - id: responsibility.tracker
+    name: Tracker Adapter
+    purpose: >
+      Own the boundary to the issue provider: normalize provider data into
+      issues, validate provider configuration, and expose optional
+      provider-native agent tools with their credentials.
+    owns:
+      - Fetching issues by state names and by ids as normalized issues.
+      - The dispatchable verdict folded from assignment, blockers, and provider policy.
+      - Provider credential resolution and the list of secret environment names.
+      - Optional provider-native tool advertisement and execution.
+    must_not_own:
+      - Scheduling policy; capability differences stay behind the boundary.
+    normative:
+      - Reads MUST be side-effect free on the provider.
+      - Malformed provider items MUST be rejected at the boundary, not passed to the scheduler.
+
+  - id: responsibility.workspace-manager
+    name: Workspace Manager
+    purpose: >
+      Own the safety and lifecycle of per-issue workspaces: derivation,
+      containment validation, bootstrap and teardown hooks, reuse, and
+      removal.
+    owns:
+      - Deriving the deterministic, collision-safe workspace key.
+      - Canonicalizing paths and enforcing containment under the configured root.
+      - Running lifecycle hooks with the workspace as working directory.
+      - Removing workspaces for terminal issues, including the startup sweep.
+    must_not_own:
+      - Deciding when an issue is terminal; the scheduler interprets tracker state.
+    normative:
+      - No create or remove operation may act on a path outside the configured root.
+
+  - id: responsibility.observability
+    name: Observability Surface
+    purpose: >
+      Own the operator-facing view: fold session events into telemetry and
+      expose orchestrator status through a live dashboard and a query API.
+    conformance: extension
+    owns:
+      - Aggregating running, retrying, and blocked claims into status snapshots.
+      - Token and rate-limit accounting across sessions.
+      - Serving the dashboard and status API and pushing updates to viewers.
+    must_not_own:
+      - Any influence on scheduling decisions beyond triggering an immediate poll.
+    normative:
+      - Observability MUST degrade gracefully when the scheduler is slow or absent.

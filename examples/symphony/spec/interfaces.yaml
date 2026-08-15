@@ -1,0 +1,192 @@
+interfaces:
+  - id: interface.workflow-document
+    name: Workflow Document
+    purpose: >
+      The single operator artifact carrying both the structured settings and
+      the prompt template for one orchestrator instance.
+    input_semantics:
+      - One document combines structured settings and a prompt-template body.
+      - Settings group by area; unknown areas and absent optional fields take documented defaults.
+      - String values may reference environment variables; references resolve at load time.
+      - Secret values resolve from provider-conventional environment fallbacks when unset.
+      - The prompt template receives every issue field plus the attempt number.
+      - Template rendering is strict; referencing an unknown variable is an error.
+    output_semantics:
+      - Loading yields validated settings plus the effective prompt template.
+      - A blank template yields a documented built-in default prompt.
+    failure_semantics:
+      - A missing document, a parse failure, or an invalid field is a load failure with a reason.
+      - Settings that decode to a non-map structure are rejected.
+      - A template parse or render failure fails the agent run that needed the prompt.
+    implementation_defined:
+      - The document's concrete syntax (the reference uses Markdown with YAML front matter).
+      - Concrete setting names and nesting (this specification fixes semantics via parameter keys).
+      - The template language (the reference uses Liquid-style templates).
+    examples:
+      - title: Minimal front matter plus prompt (reference syntax)
+        lang: markdown
+        body: |
+          ---
+          tracker:
+            kind: linear
+            provider:
+              project_slug: "my-project"
+          polling:
+            interval_ms: 5000
+          workspace:
+            root: ~/code/agent-workspaces
+          hooks:
+            after_create: |
+              git clone --depth 1 https://example.com/repo .
+          agent:
+            max_concurrent_agents: 10
+            max_turns: 20
+          codex:
+            approval_policy: never
+          ---
+
+          You are working on ticket {{ issue.identifier }}: {{ issue.title }}
+          {% if attempt %}This is follow-up attempt #{{ attempt }}.{% endif %}
+    verification:
+      - Load a document exercising defaults, environment references, and a template, and verify the resolved settings and rendered prompt.
+
+  - id: interface.cli
+    name: Service Invocation
+    purpose: >
+      How an operator starts one orchestrator instance against one workflow
+      document.
+    input_semantics:
+      - An optional workflow document path argument; absent, a documented default location applies.
+      - A mandatory explicit acknowledgement that agents run unattended without guardrails.
+      - Optional overrides for the log destination root and the observability server port.
+    output_semantics:
+      - On success the process runs until its supervision tree stops, then exits with a matching status.
+    failure_semantics:
+      - Missing acknowledgement prints a prominent warning banner and exits nonzero.
+      - A missing workflow file or invalid arguments print usage or the error and exit nonzero.
+    implementation_defined:
+      - The exact flag spellings and banner wording.
+      - The packaging (escript, release binary, or container entrypoint).
+    evidence:
+      - evidence.cli-guardrails
+      - evidence.test-guardrails
+    verification:
+      - Invoke without the acknowledgement and verify the banner and nonzero exit.
+      - Invoke with an explicit workflow path and verify that document is loaded.
+
+  - id: interface.tracker-adapter
+    name: Tracker Adapter Contract
+    purpose: >
+      The boundary every issue provider implements so the scheduler can stay
+      provider-agnostic.
+    input_semantics:
+      - Required read - fetch issues by a list of state names, normalized case-insensitively.
+      - Required read - fetch issues by a list of issue ids.
+      - Required - the list of secret environment variable names for the current settings.
+      - Optional - semantic validation of tracker settings at load time.
+      - Optional - provider-native agent tool specifications and execution (extension).
+    output_semantics:
+      - Reads return normalized Issues; malformed provider items are rejected, not passed through.
+      - The dispatchable verdict folds provider assignment, blocking relations, and readiness policy.
+      - An adapter is selected by the configured tracker kind from a documented registry.
+      - Adapters may supply provider-appropriate default active and terminal state sets.
+    failure_semantics:
+      - Reads return an error value on transport or provider failure; they never return partial guesses.
+      - An unsupported tracker kind is a configuration validation failure.
+    implementation_defined:
+      - The provider protocol, pagination, and rate handling behind each adapter.
+      - Which providers ship in the registry (the reference ships Linear, GitHub, GitLab, Jira, Asana, and an in-memory test adapter).
+    evidence:
+      - evidence.tracker-boundary
+      - evidence.issue-struct
+      - evidence.issue-identity
+    verification:
+      - Drive the scheduler against the in-memory adapter and verify identical scheduling behavior to a provider adapter.
+      - Feed a malformed provider item and verify it never reaches the scheduler.
+
+  - id: interface.agent-session-protocol
+    name: Agent Session Protocol
+    purpose: >
+      The conversation between the orchestrator and the coding-agent runtime
+      that hosts sessions and turns.
+    input_semantics:
+      - The runtime is launched with the workspace as working directory, using the operator-configured command.
+      - Session setup declares client identity, approval policy, sandbox mode, working directory, and the advertised dynamic tools.
+      - Each turn submits the prompt, a human-readable title, the approval policy, and the turn sandbox policy.
+      - The default turn sandbox policy grants write access to the workspace only; an explicit operator policy passes through unchanged.
+    output_semantics:
+      - The runtime streams line-delimited protocol messages; events carry method names and payloads.
+      - Turn completion, failure, and cancellation are distinct terminal turn events.
+      - Partial lines are buffered until terminated; non-protocol output is logged, never fatal.
+    failure_semantics:
+      - Control responses not received within the read timeout fail the operation.
+      - Turn inactivity past the turn timeout fails the turn.
+      - Runtime process exit mid-turn fails the turn with the exit status.
+    implementation_defined:
+      - The concrete protocol dialect and method names (the reference speaks the Codex app-server JSON-RPC dialect).
+      - The launch mechanism and stream transport.
+    evidence:
+      - evidence.app-server-protocol
+    verification:
+      - Verify session setup carries policy, sandbox, working directory, and tools, and each turn carries prompt and sandbox policy.
+      - Split a protocol message across stream chunks and verify correct reassembly.
+      - Verify malformed protocol-like lines are surfaced as malformed events without ending the turn.
+
+  - id: interface.workspace-hooks
+    name: Workspace Lifecycle Hooks
+    purpose: >
+      Operator-supplied shell commands that run at workspace lifecycle
+      boundaries, giving the operator control over bootstrap and salvage.
+    input_semantics:
+      - "Four hook points: after_create (bootstrap), before_run, after_run, and before_remove."
+      - Every hook runs with the workspace as working directory, through a shell, on the run's execution target.
+      - Hooks may be multi-line scripts.
+      - One shared operator-configured timeout bounds each hook execution.
+    output_semantics:
+      - Exit status zero is success; anything else is hook failure.
+      - Hook output is captured for logging, truncated to a bounded size.
+    failure_semantics:
+      - after_create failure aborts provisioning and removes the fresh workspace.
+      - before_run failure aborts the agent run before any session starts.
+      - after_run and before_remove failures are logged and ignored.
+      - A timed-out hook is terminated and treated as failed.
+    implementation_defined:
+      - The shell and invocation details.
+      - How remote hook execution transports the script (extension).
+    evidence:
+      - evidence.workspace-hooks
+      - evidence.test-hooks
+    verification:
+      - Verify each hook runs at its boundary with the workspace as working directory.
+      - Verify blocking hooks abort their operation on failure and non-blocking hooks do not.
+      - Verify a hook exceeding the timeout is terminated and handled per its blocking class.
+
+  - id: interface.observability-api
+    name: Observability API and Dashboards
+    conformance: extension
+    purpose: >
+      The operator-facing HTTP surface and dashboards for orchestrator
+      status.
+    input_semantics:
+      - A full-state query returns the current snapshot of running, retrying, and blocked claims plus totals.
+      - A per-issue query looks up one issue's status by its identifier.
+      - A refresh request asks the scheduler to poll immediately.
+      - A browser dashboard renders the same state live, self-contained without external assets.
+      - A terminal dashboard renders the same state in the service's terminal when enabled.
+    output_semantics:
+      - Refresh acknowledges acceptance and reports whether it coalesced with an in-flight cycle.
+      - Responses expose claim phases, errors, blocking reasons, session telemetry, and poll countdown.
+    failure_semantics:
+      - Unknown issue identifiers yield a not-found error.
+      - Unsupported methods on known routes yield a method-not-allowed error.
+      - Scheduler unavailability yields an explicit service-unavailable error.
+    implementation_defined:
+      - Route shapes, payload field names, and dashboard presentation.
+      - The bind address and port resolution beyond the operator parameters.
+    evidence:
+      - evidence.http-api
+      - evidence.dashboard
+      - evidence.test-observability
+    verification:
+      - Exercise state, per-issue, refresh, unknown-issue, and wrong-method requests and verify the stated outcomes.
+      - Verify the dashboard updates when scheduler state changes without a viewer-driven poll.
