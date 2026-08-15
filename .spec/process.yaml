@@ -21,6 +21,7 @@ process:
     required_views:
       - concepts and relationships
       - responsibilities and ownership
+      - decomposition into layers (how the subject comes apart, stated once in reading order)
       - end-to-end interactions
       - lifecycle and state
       - interfaces
@@ -34,6 +35,9 @@ process:
     rules:
       - Inferred intent must be supported by evidence or marked uncertain.
       - Uncertain intent must not silently become a MUST requirement.
+      - Rationale is written at the grain of what it justifies, in the slot that already holds that grain: whole-subject boundaries in the problem statement, a chapter's reason in its overview, a record's reason in that record. There is no design-intent record type and no design-intent section.
+      - Before writing a reason, find the record it explains and check whether that record already states it. A reason held apart from its record is stated twice and verified nowhere.
+      - Do not pre-announce an invariant as rationale. State the fact once, where an implementer is checked against it.
 
   - id: classify
     purpose: Separate essential semantics from incidental implementation choices.
@@ -61,8 +65,13 @@ process:
       - Normative statements must constrain a model element or relationship rather than form an isolated inventory.
       - Interactions must connect participants, sequence, invariants, and failures where applicable.
       - Lifecycle records must express semantic state rather than incidental execution state.
-      - Behavior records must be grouped into subject-domain chapters when the subject spans more than one domain.
+      - Behavior records must be grouped into chapters cut by component, not by execution phase, when the subject spans more than one component.
+      - Chapters must expand the declared layers in declared order. No chapter may use a term a later chapter defines; vocabulary two components share is hoisted into the domain model instead of forcing an order. A chapter that only assembles other chapters' outputs follows the last chapter it takes an input from. Extension chapters sort after every core chapter.
       - Operator-tunable behavior that changes normative semantics must be recorded as a parameter constraining the records it governs; concrete defaults stay implementation-defined unless the value itself is contractual. Each parameter carries a stable reference key.
+      - The chapter that specifies how configuration resolves, reloads, and is validated claims `parameters` in its `contains:`, so the fields sit with the behavior that gives them effect. Leave it unclaimed only when no chapter owns configuration behavior.
+      - State the reload contract once as `reload_default:`; give a field its own `reload:` only where it departs from that contract.
+      - A parameter's `semantics:` states what the field itself means. Behavior that belongs to a record the parameter constrains is stated on that record.
+      - Name every rendered list with `<field>_label` where the type default does not say what the list holds. Labels that repeat across dozens of records tell a reader nothing and train them to skim.
       - Concepts at data boundaries should carry typed field lists (attributes) so per-field facts — requiredness, ordering direction, comparison rules — are not lost in prose.
       - Extension records and chapters must be marked `conformance: extension`.
       - Interactions and invariants must carry falsifiable verification clauses; the renderer assembles them into the verification matrix.
@@ -83,6 +92,9 @@ process:
       - failures are connected to interactions
       - lifecycle states are reachable from the declared initial state
       - chapter references resolve and every behavior record belongs to exactly one chapter when chapters are declared
+      - the lifecycle and the configuration field list are each claimed by at most one chapter
+      - no graph declares design_intents; rationale lives on the records it justifies
+      - list labels name a list the record actually has
       - parameters name what they control and constrain resolvable records
       - conformance markers use a known level
       - interactions and invariants carry verification clauses
@@ -97,8 +109,9 @@ process:
     required_views:
       - system model overview
       - responsibility and ownership view
+      - abstraction levels (the declared decomposition, in reading order)
       - operator contract
-      - subject-domain chapters
+      - component chapters, expanding the declared layers in declared order
       - interaction narratives
       - lifecycle narrative
       - failure model
@@ -116,7 +129,11 @@ process:
       - Serve both reader models; every normative fact must be reachable through the scan path and the understanding path.
       - Open with a reading guide that routes each reader model to its path.
       - State the specification's provenance stance so readers know whether fixed mechanisms are deliberate contract or recovered observation.
-      - Project subject-domain chapters in declared order and place unassigned records in an appendix.
+      - Project component chapters in declared order and place unassigned records in an appendix.
+      - Number every subsection of a numbered section. Fold a structural subsection that ends up alone into its parent; never fold a list of records, where the heading carries a record's name.
+      - Position the state machine and the operator contract where the graph puts them, not by record type. Only the analytical front is fixed.
+      - Carry the referenced record's section number on every cross-reference, and drop the parenthetical when the record has no number.
+      - Take a list's label from the record when it gives one; the record type supplies only a fallback.
       - Mark extension chapters and records so a reader can identify the omissible surface.
       - Assemble every verification clause into a single verification matrix grouped by chapter.
       - Do not add normative semantics that are absent from the source graph.

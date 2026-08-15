@@ -30,6 +30,9 @@ The graph is intentionally centered on the subject model rather than a flat requ
 - **Reference implementations are not the specification.** Existing code may demonstrate one conforming realization without silently becoming normative.
 - **SPEC.md is a narrative projection.** Rendering resolves graph references into names and reconstructs a coherent system-level explanation rather than dumping records.
 - **Chapters cut the narrative by subject domain.** When the subject spans more than one domain, `spec/chapters.yaml` groups interactions, interfaces, invariants, failures, and the lifecycle into reader-facing chapters. Type-ordered sections are only the fallback for single-topic subjects.
+- **Only the analytical front is fixed.** Problem Statement, Goals and Non-Goals, System Overview, and Core Domain Model open every generated document the same way. Everything after them is positioned by the subject: a chapter claims the lifecycle and the configuration field list where they belong. A record type that can only be collected into a section of its own is a defect in the graph, not a section the subject asked for.
+- **Rationale has no record type.** Reasons are written where the thing they justify is written: whole-subject boundaries in the Problem Statement, a chapter's reason in its overview, a record's reason on the record. A separate list of design intents can only be dumped into a section nobody asked for, and it pre-announces the invariants that state the same facts one section later.
+- **Labels name the list, not the record type.** Any list can be named by its record with `<field>_label`. A document that prints the same handful of type-derived labels dozens of times has told the reader its sections are interchangeable.
 
 ## Repository structure
 
@@ -50,7 +53,7 @@ spec/
   failures.yaml
   implementation-defined.yaml
   reference.yaml
-  chapters.yaml        Optional subject-domain chapter layer
+  chapters.yaml        Optional chapter layer, cut by component
   parameters.yaml      Optional operator contract layer
   evidence.yaml        Optional evidence register (what the recovery used)
 examples/
@@ -107,7 +110,7 @@ make validate DIR=examples/symphony/spec
 make render   DIR=examples/symphony/spec
 ```
 
-The rendered `examples/symphony/SPEC.md` projects eight subject-domain chapters (configuration and reload; scheduling and dispatch; claim lifecycle, retry, and blocking; agent session execution; tracker adapter boundary; workspace provisioning and safety; and two optional extensions, remote execution and observability), each assembling its interactions, interfaces, lifecycle, invariants, and failure semantics in reading order. Compared against the project's own hand-written specification, the clean-room recovery reproduces its structure and operator contract, and additionally captures behavior the hand-written document lacks (the blocked-on-operator-input lifecycle state, symlink-escape workspace containment).
+The rendered `examples/symphony/SPEC.md` projects eight chapters — six core and two optional extensions — each assembling its interactions, interfaces, lifecycle, invariants, and failure semantics in reading order. Compared against the project's own hand-written specification, the clean-room recovery reproduces its structure and operator contract, and additionally captures behavior the hand-written document lacks (the blocked-on-operator-input lifecycle state, symlink-escape workspace containment).
 
 ## What a complete specification should make possible
 

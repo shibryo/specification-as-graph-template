@@ -5,6 +5,24 @@ overview: >
   Replace with one short paragraph telling the whole story: how a Request
   moves through the subject's responsibilities and becomes a Result.
 
+# Optional porting-oriented view of the subject's decomposition, rendered as
+# System Overview / Abstraction Levels. This is where the subject states how it
+# comes apart, once, in an order a reader can audit. Give each layer what it
+# holds, not how it works; the body chapters carry the detail. Delete if the
+# subject has only one layer.
+layers:
+  - id: layer.interface
+    name: Replace with the layer a caller or operator touches
+    scope: replace with the responsibility that owns this layer
+    contents:
+      - Replace with one line naming what this layer holds.
+      - One fact per line. Do not restate a responsibility's definition.
+
+  - id: layer.core
+    name: Replace with the layer that holds the subject's own decisions
+    contents:
+      - Replace with one line naming what this layer holds.
+
 # Optional list of what the environment must supply for a conforming
 # deployment (external systems, credentials, runtimes). Delete if none.
 external_dependencies:

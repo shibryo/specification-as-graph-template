@@ -17,12 +17,12 @@ Do not document the implementation. Recover and specify the subject behind the i
 5. Model important end-to-end interactions, including trigger, participants, sequence, outcome, invariants, and failures.
 6. Model lifecycle and state explicitly where state affects behavior.
 7. Treat failure and recovery semantics as part of behavior rather than implementation detail.
-8. Treat inferred design intent as uncertain until supported by evidence.
+8. Treat inferred design intent as uncertain until supported by evidence. Write it at the grain of what it justifies, in the slot that already holds that grain — see the rationale rule. There is no design-intent record type.
 9. Separate essential semantics from implementation-specific or reference-specific choices.
 10. Attach normative statements to the model element they constrain.
 11. Do not create an unstructured requirements list as the primary specification model.
-12. Group behavior records into subject-domain chapters (`spec/chapters.yaml`) when the subject spans more than one domain.
-13. Recover the operator contract: every runtime-tunable setting that changes normative behavior becomes a parameter (`spec/parameters.yaml`) constraining the records it governs. The parameter's existence and semantics are normative; its name, format, and default stay implementation-defined unless the value itself is contractual. Give each parameter a `key` — a stable reference key used by the rendered document's configuration field list.
+12. Declare the subject's decomposition once as `layers:` in `spec/model.yaml`, in reading order, and group behavior records into chapters (`spec/chapters.yaml`) that expand those layers in that order. See the chapter order rule.
+13. Recover the operator contract: every runtime-tunable setting that changes normative behavior becomes a parameter (`spec/parameters.yaml`) constraining the records it governs. The parameter's existence and semantics are normative; its name, format, and default stay implementation-defined unless the value itself is contractual. Give each parameter a `key` — a stable reference key used by the rendered document's configuration field list. State the reload contract once as `reload_default:`, and give a field its own `reload:` only where it departs from it. Have the chapter that specifies configuration behavior claim `parameters`, so a reader who opens it for "how does configuration take effect" finds the answer beside the fields.
 14. Give concepts at data boundaries a typed field list (`attributes`: name, type, requiredness, meaning). Field lists exist to carry per-field facts that prose property lists lose — requiredness, ordering direction, comparison rules — not storage layout.
 15. Mark optional capability clusters as extensions (`conformance: extension` on chapters or records). Do not promote an extension to a core requirement, and do not drop it because it is optional.
 16. Attach falsifiable verification clauses to interactions and invariants; the renderer assembles them into the test and validation matrix.
@@ -43,6 +43,70 @@ Write specification prose the way implementation-facing specifications are writt
 - Keep normative keywords and defined terms exactly.
 
 Validation warns about overlong bullet items. Fix them by splitting, not by deleting content.
+
+## Rationale rule
+
+Rationale has no record type and no section of its own. Write it where a reader
+meets the thing it justifies:
+
+| Grain | Slot |
+|---|---|
+| The whole subject | `context`, `problem`, `why_specification_exists` in `spec/intent.yaml` |
+| One chapter | that chapter's `overview:` in `spec/chapters.yaml` |
+| One record | `intent:` on the invariant, or a sentence in the record's own prose |
+
+A record-level reason renders subordinate to the statement it explains, so a
+reader can tell at a glance which sentence they are held to. Never put a
+requirement there: anything an implementation must satisfy belongs in the
+statement, where it is not typeset as an aside.
+
+A list of design intents held apart from the records fails twice. It has to be
+collected into a section nobody asked for, because a record that references
+nothing and is referenced by nothing has no other placement. And it pre-announces
+the invariants: a reader is told the same fact as rationale, then again one
+section later as the statement they are actually checked against.
+
+Before writing a reason anywhere, find the record it explains and check whether
+that record already says it. Usually it does, or should.
+
+## List label rule
+
+A label above a list names what that list holds. It does not name the slot of
+the record type the list came from.
+
+Set `<field>_label` on the record wherever the type default would not tell a
+reader anything: `requirements_label: Dispatch requirements`,
+`prevents_label: Collisions this rules out`, `verification_label: Containment
+checks`. The type-level default is a fallback for the case where the generic
+word is genuinely the right one.
+
+The measure is reuse across the whole rendered document. A hand-written
+implementation specification reuses a label barely at all — each one names its
+own section's content. A generated document that prints `Requirements:`
+thirteen times has told a reader that the thirteen lists are interchangeable,
+and by the third they are skimming. Reuse is a defect independent of whether
+any single label is defensible.
+
+Do not solve a repeated label by deleting the list or the lead-in. Name it.
+
+## Placement rule
+
+Only the analytical front of the document is fixed: Problem Statement, Goals
+and Non-Goals, System Overview, Core Domain Model. Everything after it is
+positioned by the subject's own decomposition, through `chapters.yaml`.
+
+A chapter's `contains:` may claim, at most once each across the document:
+
+- `lifecycle` — the state machine belongs to the component that owns it;
+- `parameters` — the configuration field list belongs beside the behavior that
+  resolves, validates, and reloads those fields.
+
+An unclaimed lifecycle or field list falls back to a section of its own.
+
+A record type that connects to nothing can only be dumped into a section that
+collects all of it. When a new record type has no way to be placed, ask first
+whether the facts belong on records that already exist. Adding a way to place it
+is the second-best answer, and giving it a section of its own is not an answer.
 
 ## Redundancy rule
 
@@ -97,9 +161,24 @@ The renderer MUST NOT degrade into concatenating records in storage order. It mu
 - implementation checklist and configuration field list (generated redundancy);
 - conformance expectations, including the omissible extension surface.
 
-Chapter structure is part of narrative integrity. When the subject spans more than one domain, the graph MUST declare subject-domain chapters (`spec/chapters.yaml`) that group interactions, interfaces, invariants, and failures — and, where it belongs to one domain, the lifecycle — by theme, in reading order. The renderer projects chapters in declared order; records assigned to no chapter fall to an appendix and are reported by validation. Type-ordered projection is acceptable only for single-topic subjects.
+Chapter structure is part of narrative integrity. When the subject spans more than one component, the graph MUST declare chapters (`spec/chapters.yaml`) that group interactions, interfaces, invariants, and failures — and, where it belongs to one component, the lifecycle — in reading order. The renderer projects chapters in declared order; records assigned to no chapter fall to an appendix and are reported by validation. Type-ordered projection is acceptable only for single-component subjects.
 
 Identifiers used by `spec/` are internal graph identity. The rendered specification SHOULD prefer semantic names and prose unless an identifier itself is necessary for external traceability.
+
+## Chapter order rule
+
+Cut chapters by component, not by execution phase. Someone implementing one component should find it in one place, rather than assembled from a phase in one chapter and a boundary in another.
+
+Then order the chapters so the document can be read straight through.
+
+- **Declare the decomposition once.** `layers:` in `spec/model.yaml` states how the subject comes apart, in reading order, and renders as System Overview / Abstraction Levels. The body expands that list in that order. One layer may become more than one chapter — the state a component owns and the behavior that moves it are a common split — but each chapter belongs to one layer.
+- **Explain nothing before what it rests on.** A chapter must be readable from the chapters before it. When a chapter uses a state name, an interface, or an invariant that another chapter defines, the defining chapter comes first.
+- **Hoist shared vocabulary instead of reordering.** A noun two components both need belongs to the Core Domain Model, not to whichever chapter would otherwise have to come first.
+- **Place assembly after its inputs.** A chapter that only combines what other chapters produce goes after the last chapter it takes an input from.
+- **Sort extensions last.** Chapters marked `conformance: extension` follow every core chapter, whatever ordered the rest.
+- **Record a coin-flip.** When the dependency test leaves two orders equally defensible, choose one and say why in a line. An order whose principle is stated can be argued with; an unstated one cannot.
+
+Do not order chapters by distance from the user, by how the subject executes at runtime, or by what an implementer would build first. The first is not a property most subjects have. The second belongs to reference algorithms, the third to the test and validation matrix — both are already projected elsewhere in the document, and neither may reshuffle the body.
 
 ## Abstraction rule
 

@@ -25,14 +25,14 @@ This specification serves two implementation styles.
 
 To implement by transcription, use the scan path:
 
-- The Configuration Specification lists every operator-settable field.
+- The configuration field list gives every operator-settable field.
 - Concept field lists give the data contract.
 - The Test and Validation Matrix lists the checks an implementation must pass.
 - The Implementation Checklist is the definition of done.
 
 To implement by reconstruction, read in order:
 
-- The Problem Statement and Design Intent say why the subject exists.
+- The Problem Statement says why the subject exists and which boundaries it holds to.
 - The System Overview and Core Domain Model define the participants and who owns each decision.
 - The chapters walk through behavior end to end.
 - Invariants and failures state what must survive your design choices.
@@ -45,9 +45,7 @@ Describe the environment, assumptions, and forces needed to understand the subje
 
 Describe the problem independently of the current implementation.
 
-### 1.1 Why This Specification Exists
-
-Explain which design knowledge, guarantees, or boundaries would otherwise be lost, misunderstood, or coupled to a particular implementation.
+Explain which design knowledge, guarantees, or boundaries would otherwise be lost, misunderstood, or coupled to a particular implementation. State the boundaries the subject holds to across all of its behavior here, where a reader meets them before anything rests on them.
 
 ## 2. Goals and Non-Goals
 
@@ -70,24 +68,35 @@ One line per component, then its ownership. Generated from the same records as t
 
 - **Request Processing** — Own the semantic transition from an accepted Request to an externally meaningful Result.
 
-#### Request Processing
+#### 3.1.1 Request Processing
 
 Own the semantic transition from an accepted Request to an externally meaningful Result.
 
-It owns:
+Request Processing owns:
 
 - Determining whether a Request can be processed.
 - Producing or exposing the resulting outcome.
 
-It does not own:
+Request Processing does not own:
 
 - Implementation choices explicitly declared implementation-defined.
 
-Requirements:
+Ownership requirements:
 
 - A conforming implementation MUST make processing ownership unambiguous.
 
-### 3.2 External Dependencies
+### 3.2 Abstraction Levels
+
+The subject is easiest to port when kept in these layers.
+
+1. **Replace with the layer a caller or operator touches** (replace with the responsibility that owns this layer)
+   - Replace with one line naming what this layer holds.
+   - One fact per line. Do not restate a responsibility's definition.
+
+2. **Replace with the layer that holds the subject's own decisions**
+   - Replace with one line naming what this layer holds.
+
+### 3.3 External Dependencies
 
 A conforming deployment requires this environment.
 
@@ -102,7 +111,7 @@ One line per entity, then its full definition. Generated from the same records a
 - **Request** — A unit of intent submitted to the subject for processing.
 - **Result** — The externally meaningful outcome of processing a Request.
 
-#### Request
+#### 4.1.1 Request
 
 A unit of intent submitted to the subject for processing.
 
@@ -111,7 +120,7 @@ Fields:
 - `id` (string) — REQUIRED. Stable identity for the duration required by the specification.
 
 
-#### Result
+#### 4.1.2 Result
 
 The externally meaningful outcome of processing a Request.
 
@@ -120,39 +129,11 @@ The externally meaningful outcome of processing a Request.
 
 **Request** produces **Result**. Processing a Request may produce one Result according to the required behavior.
 
-## 5. Design Intent
+## 5. Request Processing
 
-### Preserve semantic behavior
+How a Request becomes a Result: the end-to-end flow, the interface it is submitted through, the guarantees the flow must uphold, its lifecycle, the operator contract that tunes it, and how it behaves when processing is interrupted. Every path through this chapter ends in exactly one authoritative outcome, because a caller that cannot tell a Result from a failure cannot act on either.
 
-Conforming implementations should be free to vary internally while preserving externally meaningful behavior and the relationships between core concepts.
-
-Reproducing implementation details is not the same as preserving the system.
-
-Implications:
-
-- Normative statements should describe semantics before mechanisms.
-
-Notes:
-
-- Some implementation freedom is intentionally left unresolved by the specification.
-
-## 6. Configuration Specification
-
-Each field below must exist and be operator-settable. Keys are reference names used by this document, not required spellings. Concrete names, formats, and defaults are implementation-defined unless fixed elsewhere. The stated semantics are normative. One entry per field; sub-bullets give its semantics, reload behavior, and the behaviors it governs.
-
-### 6.1 Core Fields
-
-- `processing.capacity` — How many Requests may be processed concurrently.
-  - Admission of new Requests never exceeds the configured capacity.
-  - Requests deferred by capacity are not lost; they remain eligible for later processing.
-  - Reload: Operator changes take effect for subsequent admission decisions without restarting the subject.
-  - Used by **Process Request**.
-
-## 7. Request Processing
-
-How a Request becomes a Result: the end-to-end flow, the interface it is submitted through, the guarantees the flow must uphold, its lifecycle, and how it behaves when processing is interrupted.
-
-### Process Request
+### 5.1 Process Request
 
 Describe the end-to-end interaction that turns an accepted Request into a Result.
 
@@ -174,17 +155,19 @@ Postconditions:
 
 - The outcome is observable as either a Result or a defined failure.
 
+Outcome requirements:
+
 - **MUST NOT** — Complete with an ambiguous externally observable outcome.
 
-Constrained by **Outcome Is Unambiguous**.
+Constrained by **Outcome Is Unambiguous** (Section 5.5).
 
-Failures: **Processing Interrupted**.
+Failures: **Processing Interrupted** (Section 5.6).
 
 Validation checks:
 
 - Submit a valid Request and verify exactly one unambiguous outcome (a Result or a defined failure) becomes observable.
 
-### Example Interface
+### 5.2 Example Interface
 
 Describe an externally meaningful interaction boundary.
 
@@ -206,7 +189,7 @@ Implementation-defined mechanisms:
 - Serialization.
 - Invocation mechanism.
 
-### Lifecycle and State
+### 5.3 Lifecycle and State
 
 The lifecycle begins in **Accepted**.
 
@@ -215,21 +198,32 @@ The lifecycle begins in **Accepted**.
 - **Completed** — A successful Result is externally observable. This is terminal.
 - **Failed** — A defined terminal failure is externally observable. This is terminal.
 
-#### Transitions
+#### 5.3.1 Transitions
 
 - **Accepted** → **Processing** when processing begins.
 - **Processing** → **Completed** when a successful result becomes authoritative.
 - **Processing** → **Failed** when a terminal failure becomes authoritative.
 
-#### Lifecycle Constraints
+#### 5.3.2 Lifecycle Constraints
 
 - A Request cannot be simultaneously authoritative as both Completed and Failed.
 
-### Outcome Is Unambiguous
+### 5.4 Configuration Fields
+
+Each field below must exist and be operator-settable. Keys are reference names used by this document, not required spellings. Concrete names, formats, and defaults are implementation-defined unless fixed elsewhere. The stated semantics are normative. One entry per field; sub-bullets give its semantics and the behaviors it governs.
+
+Reload: Operator changes take effect on subsequent decisions without restarting the subject. A field whose reload behavior differs states its own.
+
+- `processing.capacity` — How many Requests may be processed concurrently.
+  - Admission of new Requests never exceeds the configured capacity.
+  - Requests deferred by capacity are not lost; they remain eligible for later processing.
+  - Used by **Process Request** (Section 5.1).
+
+### 5.5 Outcome Is Unambiguous
 
 For a given logical Request, the authoritative externally observable outcome does not simultaneously represent mutually exclusive terminal states.
 
-Consumers should not need to infer which incompatible outcome is authoritative.
+*Consumers should not need to infer which incompatible outcome is authoritative.*
 
 This prevents:
 
@@ -239,23 +233,23 @@ Validation checks:
 
 - Attempt conflicting terminal transitions and verify that only one becomes authoritative.
 
-### Processing Interrupted
+### 5.6 Processing Interrupted
 
 Processing stops before a successful terminal outcome becomes authoritative.
 
-Occurs during **Process Request**.
+Occurs during **Process Request** (Section 5.1).
 
 Retryable: implementation-defined.
 
-Requirements:
+Required behavior:
 
 - Preserve enough information to avoid an ambiguous terminal outcome.
 
 Recovery: The implementation may retry, resume, compensate, or fail terminally, provided the resulting authoritative state satisfies all invariants.
 
-## 8. Implementation-Defined Areas
+## 6. Implementation-Defined Areas
 
-### Persistence mechanism
+### 6.1 Persistence mechanism
 
 Any persistence approach may be used.
 
@@ -267,7 +261,7 @@ A conforming implementation must document:
 
 - The selected persistence approach and the durability guarantees it provides.
 
-### Execution topology
+### 6.2 Execution topology
 
 Responsibilities may be implemented in one or multiple execution units.
 
@@ -275,26 +269,22 @@ Fixed semantics:
 
 - Responsibility ownership remains semantically unambiguous.
 
-## 9. Reference Implementation
+## 7. Reference Implementation
 
 Describe the current or example implementation here if one exists. It is one realization of the specification and does not silently add normative requirements.
 
 The reference implementation is **not normative**; it is one realization of this specification.
 
-## 10. Test and Validation Matrix
+## 8. Test and Validation Matrix
 
 Checks assembled from the verification clauses of this specification. A conforming implementation should be able to demonstrate each of them. Checks under an optional extension apply only when that extension is implemented.
-
-### 10.1 Request Processing
 
 - **Process Request** — Submit a valid Request and verify exactly one unambiguous outcome (a Result or a defined failure) becomes observable.
 - **Outcome Is Unambiguous** — Attempt conflicting terminal transitions and verify that only one becomes authoritative.
 
-## 11. Implementation Checklist (Definition of Done)
+## 9. Implementation Checklist (Definition of Done)
 
 Generated from the specification graph. Intentionally redundant with the body.
-
-### 11.1 Core
 
 - Interactions: **Process Request**.
 - Lifecycle: implement every state and transition of the lifecycle.
@@ -304,7 +294,7 @@ Generated from the specification graph. Intentionally redundant with the body.
 - Configuration fields: `processing.capacity`.
 - Documentation: record the selected behavior for every implementation-defined area.
 
-## 12. Conformance
+## 10. Conformance
 
 Implement a conforming realization of this specification. Preserve normative semantics and design intent. Do not infer additional constraints from the reference implementation. Where behavior is implementation-defined, choose a reasonable mechanism that preserves all stated invariants.
 

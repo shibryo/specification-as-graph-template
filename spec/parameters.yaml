@@ -6,6 +6,16 @@
 # itself is contractual. Each parameter must constrain at least one
 # behavior record. Delete this file if the subject has no operator-tunable
 # behavior.
+#
+# The field list renders inside whichever chapter claims `parameters` in its
+# `contains:`, and as a front section of its own when no chapter claims it.
+
+# State the reload contract once. Give a field its own `reload:` only where it
+# departs from this; a contract repeated under every field is one contract
+# printed many times, and a reader stops reading it after the third.
+reload_default: >
+  Operator changes take effect on subsequent decisions without restarting the subject.
+
 parameters:
   - id: parameter.processing-capacity
     name: Processing capacity
@@ -15,8 +25,5 @@ parameters:
     semantics:
       - Admission of new Requests never exceeds the configured capacity.
       - Requests deferred by capacity are not lost; they remain eligible for later processing.
-    reload: >
-      Operator changes take effect for subsequent admission decisions without
-      restarting the subject.
     constrains:
       - interaction.process-request

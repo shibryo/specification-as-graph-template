@@ -1,114 +1,146 @@
 responsibilities:
-  - id: responsibility.config
-    name: Configuration Authority
-    purpose: >
-      Own the loading, validation, hot reload, and serving of the workflow
-      document so every other responsibility reads one consistent,
-      always-valid view of operator intent.
-    owns:
-      - Parsing the workflow document into settings and prompt template.
-      - Structural and semantic validation, including tracker-adapter validation.
-      - Detecting document changes and swapping in reloaded settings atomically.
-      - Retaining the last known good configuration when a reload fails.
-    must_not_own:
-      - Scheduling decisions made with the settings it serves.
-    normative:
-      - Settings served to readers MUST always come from a fully validated document.
-
   - id: responsibility.scheduler
-    name: Scheduler
+    name: Work Scheduler
     purpose: >
-      Own the claim ledger and the polling loop; decide when each issue is
-      dispatched, retried, blocked, reconciled, or released.
+      Own every decision about which Work Items are claimed, dispatched, retried,
+      blocked, or released. It is the single authority over claims.
     owns:
-      - The periodic poll cycle and immediate refresh requests.
-      - Claim admission, including all eligibility and capacity checks.
-      - Retry timers, backoff progression, and attempt accounting.
-      - Blocked-entry bookkeeping for issues awaiting operator input.
-      - Reconciling running and blocked claims against fresh tracker state.
-      - Selecting the execution target for each run.
+      - Deciding which Work Items qualify for an Agent Run right now.
+      - Holding and releasing Claims.
+      - Enforcing every concurrency limit.
+      - Ordering candidates for dispatch.
+      - Scheduling retries and their delays.
+      - Deciding that a run has stalled.
+      - Deciding that an item is blocked on operator input.
+      - Reconciling live Claims against the Work Source.
     must_not_own:
-      - Provider-specific issue interpretation; the adapter normalizes first.
-      - The content or conduct of an agent turn.
+      - Executing the agent or talking its protocol.
+      - Creating or removing workspace content.
+      - Provider-specific query, identity, or capability details.
+      - Rendering the operator-facing view of runtime state.
     normative:
-      - The scheduler MUST NOT dispatch an issue it already holds a claim for.
-      - The scheduler MUST re-read runtime-tunable settings at least once per poll cycle.
+      - Exactly one scheduler authority MUST own the claim set.
+      - The scheduler MUST NOT dispatch a Work Item it already claims.
+      - The scheduler MUST re-read a Work Item before dispatching it.
+      - The scheduler MUST release a Claim when its item stops qualifying.
+      - The scheduler MUST NOT retry an item that is waiting for operator input.
 
-  - id: responsibility.agent-runner
+  - id: responsibility.run-supervisor
     name: Agent Run Supervisor
     purpose: >
-      Own one agent run end to end: workspace readiness, lifecycle hooks,
-      the turn loop against a single session, and continuation decisions
-      based on fresh issue state.
+      Own the execution of one claimed Work Item from workspace preparation through
+      the last Turn of its Agent Session.
     owns:
-      - Ordering of workspace provisioning, hooks, session start, and teardown.
-      - The per-run turn loop and its turn budget.
-      - Re-checking issue state and routing between turns.
+      - Requesting the Workspace for the run.
+      - Running the configured lifecycle hooks around the run.
+      - Starting and ending the Agent Session.
+      - Rendering the prompt for each Turn.
+      - Deciding whether another Turn is warranted.
+      - Reporting run progress to the scheduler.
     must_not_own:
-      - Retry scheduling and host selection; the scheduler decides both.
+      - Claim decisions or concurrency limits.
+      - Choosing which Work Item to run.
+      - Choosing the execution location for its own retry.
     normative:
-      - A run MUST release its session and run teardown hooks on every exit path.
-
-  - id: responsibility.codex-client
-    name: Agent Session Protocol Client
-    purpose: >
-      Own the wire conversation with the coding-agent runtime: session and
-      turn setup, event streaming, approval and input-request handling, and
-      tool-call brokering.
-    owns:
-      - Encoding session policies (approval, sandbox, working directory) at session start.
-      - Classifying mid-turn requests as auto-approvable, tool calls, or operator-input blockers.
-      - Enforcing response and turn timeouts on the stream.
-      - Withholding tracker secrets from the agent process environment.
-    must_not_own:
-      - Deciding whether a blocked issue is later released; the scheduler owns claims.
-    normative:
-      - A turn that requires operator input MUST end as a distinguishable blocker, not as a generic failure.
-
-  - id: responsibility.tracker
-    name: Tracker Adapter
-    purpose: >
-      Own the boundary to the issue provider: normalize provider data into
-      issues, validate provider configuration, and expose optional
-      provider-native agent tools with their credentials.
-    owns:
-      - Fetching issues by state names and by ids as normalized issues.
-      - The dispatchable verdict folded from assignment, blockers, and provider policy.
-      - Provider credential resolution and the list of secret environment names.
-      - Optional provider-native tool advertisement and execution.
-    must_not_own:
-      - Scheduling policy; capability differences stay behind the boundary.
-    normative:
-      - Reads MUST be side-effect free on the provider.
-      - Malformed provider items MUST be rejected at the boundary, not passed to the scheduler.
+      - A supervisor MUST run exactly one Work Item at a time.
+      - A supervisor MUST end its Agent Session when its run ends.
+      - A supervisor MUST report a failed run to the scheduler rather than retry it.
+      - A supervisor MUST stop starting Turns once the item leaves the active set.
 
   - id: responsibility.workspace-manager
     name: Workspace Manager
     purpose: >
-      Own the safety and lifecycle of per-issue workspaces: derivation,
-      containment validation, bootstrap and teardown hooks, reuse, and
-      removal.
+      Own the isolation, identity, and containment of the directory each Work Item's
+      runs execute in.
     owns:
-      - Deriving the deterministic, collision-safe workspace key.
-      - Canonicalizing paths and enforcing containment under the configured root.
-      - Running lifecycle hooks with the workspace as working directory.
-      - Removing workspaces for terminal issues, including the startup sweep.
+      - Deriving the deterministic workspace identity of a Work Item.
+      - Verifying that a workspace path resolves inside the configured root.
+      - Creating, reusing, and removing workspaces.
+      - Executing the configured workspace hooks.
     must_not_own:
-      - Deciding when an issue is terminal; the scheduler interprets tracker state.
+      - Any decision about which items are worked on.
+      - The content the agent produces inside a workspace.
     normative:
-      - No create or remove operation may act on a path outside the configured root.
+      - A workspace path that resolves outside the configured root MUST be refused.
+      - The configured workspace root itself MUST NOT be used as a workspace.
+      - The same Work Item identifier MUST always yield the same workspace identity.
+      - Distinct identifiers MUST NOT collapse onto one workspace identity.
 
-  - id: responsibility.observability
-    name: Observability Surface
+  - id: responsibility.configuration-store
+    name: Configuration Store
     purpose: >
-      Own the operator-facing view: fold session events into telemetry and
-      expose orchestrator status through a live dashboard and a query API.
-    conformance: extension
+      Own loading, validating, and re-reading the Workflow Definition, and own which
+      version of it is currently effective.
     owns:
-      - Aggregating running, retrying, and blocked claims into status snapshots.
-      - Token and rate-limit accounting across sessions.
-      - Serving the dashboard and status API and pushing updates to viewers.
+      - Reading the Workflow Definition.
+      - Validating it, including work-source-specific requirements.
+      - Deciding when a changed definition becomes effective.
+      - Retaining the last version that validated.
     must_not_own:
-      - Any influence on scheduling decisions beyond triggering an immediate poll.
+      - Interpreting settings as scheduling decisions.
+      - Deciding what to do when a setting changes mid-run.
     normative:
-      - Observability MUST degrade gracefully when the scheduler is slow or absent.
+      - An invalid Workflow Definition MUST NOT become effective.
+      - The subject MUST NOT start when no valid definition is available.
+      - A failed re-read MUST leave the last valid definition effective.
+      - A reload failure MUST be reported to the operator.
+
+  - id: responsibility.work-source-adapter
+    name: Work Source Adapter
+    purpose: >
+      Own everything provider-specific: how work is read, how it is normalized into
+      Work Items, and which native capabilities the agent is offered.
+    owns:
+      - Reading Work Items by state and by identity within the configured scope.
+      - Normalizing provider records into Work Items.
+      - Rejecting provider records that cannot yield a valid Work Item.
+      - Declaring which credential-bearing environment names it uses.
+      - Validating its own configuration.
+      - Advertising and executing provider-native agent tools.
+    must_not_own:
+      - Claim, concurrency, retry, or ordering policy.
+      - Writing back to the Work Source on the scheduler's behalf.
+    normative:
+      - The adapter MUST expose reads by state and reads by item identity.
+      - The adapter MUST drop provider records that lack a required Work Item field.
+      - The adapter MUST report a read failure rather than return partial results.
+      - Provider readiness signals MUST NOT bypass scheduler policy.
+
+  - id: responsibility.session-client
+    name: Agent Session Client
+    purpose: >
+      Own the conversation with the agent runtime: starting a session in a workspace,
+      running turns, applying the configured approval policy, and reporting updates.
+    owns:
+      - Launching the agent runtime in the workspace.
+      - Removing credential-bearing variables from the agent's environment.
+      - Applying the configured approval and sandbox policy.
+      - Translating agent messages into timestamped updates.
+      - Detecting that the agent is asking for operator input.
+      - Executing tool calls the agent makes and returning results.
+    must_not_own:
+      - Retry, backoff, or claim decisions.
+      - Deciding whether another Turn should follow.
+    normative:
+      - The session MUST start with the run's Workspace as its working directory.
+      - The client MUST NOT pass configured credential variables to the agent process.
+      - A request for operator input MUST end the turn as a distinguishable outcome.
+      - The client MUST report an unanswered agent request rather than guess an answer.
+
+  - id: responsibility.observability-publisher
+    name: Runtime State Publisher
+    purpose: >
+      Own the externally observable projection of orchestration: what is running,
+      retrying, or blocked, and what each has consumed.
+    owns:
+      - Projecting scheduler state into Runtime State.
+      - Accounting the agent resource usage reported for each run.
+      - Serving the operator's request to poll sooner.
+    must_not_own:
+      - Any scheduling decision.
+      - Being the durable record of what happened.
+    normative:
+      - Runtime State MUST distinguish running, retrying, and blocked items.
+      - A blocked or retrying item MUST be reported with the reason.
+      - Publishing MUST NOT block or slow the scheduler.
+      - Usage totals MUST NOT decrease within a run.

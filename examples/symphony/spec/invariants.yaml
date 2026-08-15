@@ -1,304 +1,304 @@
 invariants:
-  - id: invariant.valid-config-to-run
-    name: Only Validated Configuration Is Ever Effective
-    basis: stated
-    statement: >
-      Every setting the service acts on comes from a workflow document that
-      passed full structural and semantic validation. An invalid document
-      prevents startup; an invalid edit never replaces the running
-      configuration.
-    intent: >
-      Operators must be able to edit configuration live without risking the
-      agents currently running.
-    prevents:
-      - Running with partially applied or defaulted-over broken settings.
-      - A bad edit taking down mid-run agents.
-    evidence:
-      - evidence.workflow-store
-      - evidence.test-startup-preflight
-      - evidence.test-last-good
-    verification:
-      - Attempt startup with each class of invalid document and verify refusal with a reason.
-      - Break the document mid-run and verify all subsequent reads still serve the prior settings.
-
   - id: invariant.single-claim
-    name: One Claim per Issue
+    name: One Claim Per Work Item
     basis: stated
-    statement: >
-      At any moment, at most one claim exists per issue id, and an issue with
-      a claim in any lifecycle state is never dispatched again until that
-      claim is released.
-    intent: >
-      The claim is the sole guard against two agents working the same issue.
-    prevents:
-      - Duplicate concurrent agents corrupting one workspace or tracker thread.
-      - Retry timers and live runs coexisting for one issue.
     evidence:
-      - evidence.test-no-overlap
-      - evidence.orchestrator-dispatch-guards
-    verification:
-      - Drive poll cycles while an issue runs, retries, and blocks, and verify no second dispatch occurs.
-      - Restart the orchestrator mid-run and verify redispatched work does not overlap a surviving agent.
-
-  - id: invariant.concurrency-caps
-    name: Concurrency Never Exceeds Configured Caps
-    basis: stated
-    statement: >
-      The number of concurrently running agent runs never exceeds the global
-      cap, the per-tracker-state cap for any state, or the per-host cap on
-      any execution target.
-    intent: >
-      Operators bound resource usage and tracker churn with hard limits.
-    prevents:
-      - Resource exhaustion on the orchestrator or a worker host.
-      - One tracker state monopolizing all execution slots.
-    evidence:
-      - evidence.orchestrator-slots
-      - evidence.test-hostcaps
-      - evidence.test-per-state-caps
-    verification:
-      - Offer more eligible issues than each cap allows and verify running counts stay at the cap.
-      - Lower a cap at runtime and verify subsequent admission respects the new value.
-
-  - id: invariant.dispatch-revalidation
-    name: Fresh State Precedes Every Spawn
-    basis: stated
-    statement: >
-      Immediately before an agent run is spawned - on first dispatch and on
-      every retry - the issue is re-fetched by id and the dispatch is skipped
-      unless the fresh issue is still an eligible candidate.
-    intent: >
-      Listing results and retry decisions are stale by the time they act;
-      only a just-fetched issue may justify spending an agent on it.
-    prevents:
-      - Starting agents on issues closed, reassigned, or blocked since listing.
-    evidence:
-      - evidence.orchestrator-revalidate
+      - evidence.orchestrator-code
       - evidence.test-dispatch-eligibility
-    verification:
-      - Change an issue's state between listing and spawn and verify the spawn is skipped.
-      - Verify a retry whose refetch shows lost routing releases instead of spawning.
-
-  - id: invariant.priority-order
-    name: Deterministic Dispatch Order
-    basis: stated
     statement: >
-      Dispatch candidates are ordered by provider priority rank (1 highest
-      through 4, absent or invalid last), then oldest creation time, then
-      identifier.
+      At most one Claim exists for a Work Item at any time, and a claimed item has at
+      most one active Agent Run.
     intent: >
-      Operators can predict which issues get slots first when capacity is
-      scarce.
+      Two agents on one item duplicate effort and contend for the same branch.
     prevents:
-      - Starvation of old high-priority items by arrival order accidents.
-    evidence:
-      - evidence.orchestrator-sort
-      - evidence.test-dispatch-eligibility
+      - Two concurrent runs advancing the same Work Item.
+      - A retry starting while the earlier run is still active.
+      - A restarted deployment redispatching work it is already running.
     verification:
-      - Offer candidates with mixed priority, age, and identifier and verify the exact order.
-      - Verify issues without priority or creation time sort after those with them.
+      - Offer a claimed item as a candidate again and verify no second run starts.
+      - Trigger a retry while the run is active and verify the run is not duplicated.
+      - Verify a blocked item is never selected while its claim is held.
 
-  - id: invariant.tracker-authority
-    name: Tracker State Supersedes Local Claims
+  - id: invariant.dispatch-order-deterministic
+    name: Dispatch Order Is Deterministic
     basis: stated
-    statement: >
-      When fresh tracker state contradicts a local claim - the issue became
-      terminal, left the active states, lost routing, or disappeared - the
-      claim yields: agents stop and the claim is released. Absence of fresh
-      state (a failed fetch) changes nothing.
-    intent: >
-      Humans and other tools own the tracker; the orchestrator must follow,
-      not fight, their changes.
-    prevents:
-      - Agents continuing work on closed or reassigned issues.
-      - Tracker outages mass-stopping healthy agents.
     evidence:
-      - evidence.orchestrator-reconcile
-      - evidence.test-reconcile
+      - evidence.orchestrator-code
+      - evidence.test-dispatch-ordering
+    statement: >
+      Candidates are dispatched in a total order derived from priority, then age,
+      then identifier, so equal capacity always yields the same selection.
+    intent: >
+      Operators must be able to predict which work an agent picks up next.
+    prevents:
+      - Starvation of an older item by a newer one of equal priority.
+      - Selection that varies between runs for the same board state.
     verification:
-      - For each contradiction class (terminal, inactive, unrouted, missing) verify agent stop and claim release.
-      - Fail the fetch and verify no claim changes.
+      - Offer items of differing priority and verify higher priority dispatches first.
+      - Offer items of equal priority and verify the older one dispatches first.
+      - Offer items with equal priority and age and verify identifier order decides.
+      - Offer an item with no priority and verify it sorts after every prioritized item.
 
-  - id: invariant.blocked-not-retried
-    name: Blocked Issues Are Held, Not Retried
+  - id: invariant.concurrency-limits-respected
+    name: Concurrency Limits Are Never Exceeded
     basis: stated
-    statement: >
-      An issue blocked on operator input or approval is never automatically
-      restarted or retried; it stays held and visible until reconciliation
-      observes its tracker state change.
-    intent: >
-      Re-running an agent that is waiting for a human wastes budget and can
-      repeat the action that needed approval.
-    prevents:
-      - Retry loops against a question only a human can answer.
-      - Silent disappearance of issues that need human attention.
     evidence:
-      - evidence.orchestrator-block
-      - evidence.test-blocking
+      - evidence.orchestrator-code
+      - evidence.test-concurrency-limits
+      - evidence.readme-implementation
+    statement: >
+      The number of active Agent Runs never exceeds the configured limit overall, the
+      configured limit for the item's board state, or the configured limit per
+      execution location.
+    intent: >
+      Capacity limits exist because agents consume real machines, quota, and money.
+    prevents:
+      - Exhausting a worker host by admitting more runs than it can carry.
+      - A single crowded board state consuming all global capacity.
+      - A retry bypassing the limit that blocked the original dispatch.
     verification:
-      - Block an issue and run many poll cycles, verifying no dispatch or retry occurs.
-      - Verify stall detection routes input-waiting runs to blocked, not to backoff retry.
+      - Fill global capacity and verify further qualifying items are not dispatched.
+      - Fill one state's capacity and verify items in other states still dispatch.
+      - Fill one host's share and verify dispatch moves to another host or defers.
+      - Reach capacity at retry time and verify a further retry is scheduled instead.
 
-  - id: invariant.bounded-backoff
-    name: Failure Retries Back Off Within a Cap
+  - id: invariant.dispatch-revalidated
+    name: Dispatch Decisions Are Revalidated
     basis: stated
-    statement: >
-      Consecutive failure retries for one issue wait progressively longer,
-      never exceed the operator-configured maximum backoff, and the first
-      failure retry already waits a non-trivial delay.
-    intent: >
-      A persistently failing issue must not hammer the tracker or the agent
-      runtime, yet must keep being retried.
-    prevents:
-      - Tight crash loops consuming agent budget and provider rate limits.
-      - Unbounded delays that effectively abandon an issue.
     evidence:
-      - evidence.orchestrator-retry
-      - evidence.test-retry-backoff
-    verification:
-      - Fail a run repeatedly and verify each scheduled delay is at least the previous one until the cap.
-      - Verify no scheduled failure-retry delay exceeds the configured maximum.
-
-  - id: invariant.turn-bound
-    name: Turn Budget Bounds Every Run
-    basis: stated
+      - evidence.orchestrator-code
+      - evidence.test-dispatch-revalidation
     statement: >
-      One agent run executes at most the configured number of turns; when the
-      budget is exhausted with the issue still active, the run ends normally
-      and control returns to the scheduler, which may start a fresh run.
+      A Work Item is re-read from the Work Source immediately before an Agent Run
+      starts, and the run does not start if it no longer qualifies.
     intent: >
-      A run that cannot finish must yield so scheduling policy, fresh
-      configuration, and fairness re-apply between runs.
+      Board state changes between the poll and the dispatch, and an agent run is
+      expensive to start and to undo.
     prevents:
-      - A single run monopolizing a slot indefinitely.
-      - Continuation decisions escaping scheduler policy.
-    evidence:
-      - evidence.agent-runner
-      - evidence.test-turnloop
+      - Starting a run for an item a human just closed.
+      - Starting a run for an item whose required label was just removed.
+      - Starting a run for an item that was just reassigned elsewhere.
     verification:
-      - Keep an issue active past the budget and verify the run ends and a continuation check is scheduled.
-      - Verify no run ever executes more turns than the configured budget.
-
-  - id: invariant.secret-isolation
-    name: Tracker Secrets Never Reach the Agent
-    basis: stated
-    statement: >
-      Credential environment variables declared secret by the tracker
-      adapter are removed from the agent process environment on every
-      execution target; agents access the tracker only through brokered
-      provider-native tools.
-    intent: >
-      The agent executes untrusted, model-generated commands; ambient
-      credentials would let those commands act as the orchestrator.
-    prevents:
-      - Exfiltration or misuse of tracker credentials by agent-run commands.
-    evidence:
-      - evidence.app-server-secrets
-      - evidence.test-secrets
-    verification:
-      - Inspect the agent child environment locally and verify declared secret names are absent.
-      - Verify the remote launch command strips the same names before starting the agent.
+      - Move an item to a terminal state between poll and dispatch, then verify no run starts.
+      - Remove a required label between poll and dispatch, then verify no run starts.
+      - Hide the item between poll and dispatch, then verify the claim is released.
 
   - id: invariant.workspace-containment
-    name: Workspace Operations Stay Inside the Root
+    name: Workspaces Stay Inside the Configured Root
     basis: stated
-    statement: >
-      Every local workspace create and remove operation acts on a
-      canonicalized path strictly inside the configured workspace root;
-      the root itself, symlink escapes, and outside paths are refused with
-      the operation unperformed.
-    intent: >
-      The workspace root is the entire local blast radius the operator
-      granted; nothing may widen it, including hostile symlinks.
-    prevents:
-      - An agent or a crafted identifier causing writes or deletion outside the root.
-      - Recursive removal of the root or of linked-in directories.
     evidence:
-      - evidence.workspace-validate
-      - evidence.test-workspace-safety
+      - evidence.workspace-code
+      - evidence.agents-conventions
+      - evidence.test-workspace-containment
+    statement: >
+      Every path the subject creates, runs an agent in, or deletes resolves, after
+      links are followed, to a location strictly inside the configured workspace root.
+    intent: >
+      An autonomous agent with a writable path outside its workspace can damage the
+      operator's own source tree, and a delete outside the root is unrecoverable.
+    prevents:
+      - Running an agent turn inside the operator's source repository.
+      - Escaping the workspace root through a symbolic link.
+      - Deleting the workspace root itself.
+      - Deleting a path that a recorded value pointed outside the root.
     verification:
-      - Attempt creation and removal through symlinks escaping the root and verify refusal.
-      - Attempt removal of the root itself and verify a distinct refusal.
-      - Verify a recorded workspace path is re-validated before removal.
+      - Link a workspace path outside the root and verify creation is refused.
+      - Link a workspace path outside the root and verify removal is refused.
+      - Ask for the workspace root itself and verify it is refused with a distinct reason.
+      - Verify the agent's working directory is the workspace and not its parent.
 
-  - id: invariant.workspace-determinism
-    name: Deterministic Workspace Identity
+  - id: invariant.workspace-identity-deterministic
+    name: Workspace Identity Is Deterministic and Collision-Free
     basis: stated
-    statement: >
-      The workspace key is a pure function of the issue identifier: the same
-      identifier always yields the same key, distinct identifiers always
-      yield distinct keys, and any party knowing only the identifier can
-      derive the key.
-    intent: >
-      Retries, continuation runs, and cleanup must all find the same
-      directory without shared state.
-    prevents:
-      - Retries losing prior work by landing in a new directory.
-      - Sanitization collisions merging two issues into one workspace.
     evidence:
-      - evidence.workspace-key
-      - evidence.test-workspace-safety
+      - evidence.workspace-code
+      - evidence.test-workspace-identity
+    statement: >
+      One Work Item identifier always maps to the same workspace identity, and two
+      different identifiers never map to the same one.
+    intent: >
+      A run must find the work its predecessor left behind, and unrelated items must
+      never share a checkout.
+    prevents:
+      - A retry starting from an empty workspace and losing prior work.
+      - Two items whose identifiers differ only in unusable characters colliding.
+      - Cleanup deleting the workspace of a different item.
     verification:
-      - Derive the key twice for one identifier and verify equality.
-      - Derive keys for identifiers that sanitize identically and verify inequality.
+      - Derive the identity twice for one identifier and verify the results match.
+      - Derive identities for two identifiers that sanitize alike and verify they differ.
+      - Leave a file in a workspace, retry the item, and verify the file is still present.
 
-  - id: invariant.tool-binding-stability
-    name: Session-Start Tool Binding Is Immutable
+  - id: invariant.agent-environment-excludes-credentials
+    name: The Agent Never Receives the Subject's Credentials
     basis: stated
-    conformance: extension
-    statement: >
-      The tracker adapter, settings, tool specifications, and secret names
-      used for provider-native tool execution are captured once at session
-      start; a configuration reload never changes what an in-flight session's
-      tools do or authenticate as.
-    intent: >
-      Tool advertisement and tool execution must not drift apart within one
-      session when the operator edits configuration.
-    prevents:
-      - A mid-session reload re-pointing advertised tools at a different tracker or credential.
     evidence:
-      - evidence.tracker-bind
-      - evidence.test-tool-binding
+      - evidence.app-server-code
+      - evidence.readme-implementation
+      - evidence.test-agent-tool
+    statement: >
+      Every environment variable the configuration declares as credential-bearing for
+      the Work Source is absent from the agent process.
+    intent: >
+      The subject's credential is the operator's authority over the board. An agent
+      holding it can act outside the orchestrator's policy and outside its audit.
+    prevents:
+      - The agent reading or writing the board outside the offered tools.
+      - A credential leaking into agent-visible logs or a committed file.
+      - A workspace-readable configuration file becoming a credential store.
     verification:
-      - Reload the configuration with different tracker settings mid-session and verify tool calls still use the snapshot.
+      - Declare a credential variable and verify it is unset in the agent process.
+      - Verify the agent can still act on the board through an offered tool.
+      - Verify the subject itself still reads the board successfully.
 
-  - id: invariant.host-affinity
-    name: One Run, One Host
+  - id: invariant.turn-budget-bounded
+    name: One Run's Turns Are Bounded
     basis: stated
-    conformance: extension
-    statement: >
-      An agent run executes its workspace provisioning, hooks, and session on
-      exactly one worker host; host changes happen only between runs, through
-      the scheduler's retry path.
-    intent: >
-      Workspace state lives on the host; hopping mid-run would silently
-      abandon it and split one run's effects across machines.
-    prevents:
-      - Split-brain workspaces for one attempt across hosts.
-      - Failure handling inside a run masking host problems from the scheduler.
     evidence:
-      - evidence.agent-runner-affinity
-      - evidence.test-remote
+      - evidence.agent-runner-code
+      - evidence.readme-implementation
+      - evidence.test-turn-continuation
+    statement: >
+      A single Agent Run starts no more than the configured number of Turns, even
+      while its Work Item stays active.
+    intent: >
+      An unbounded turn loop lets one run hold capacity forever and hides the fact
+      that the agent is not converging.
+    prevents:
+      - One item consuming a slot indefinitely.
+      - An agent looping on the same work without the scheduler ever regaining control.
     verification:
-      - Fail the session launch on the selected host and verify the run fails rather than moving hosts.
-      - Verify a retry after a host failure prefers the recorded host when it has capacity.
+      - Keep an item active and verify no more than the configured number of turns run.
+      - Exhaust the budget and verify control returns to the scheduler with the claim held.
 
-  - id: invariant.token-accounting
-    name: Monotonic Token Accounting
+  - id: invariant.claim-follows-eligibility
+    name: A Claim Lives Only While Its Item Qualifies
     basis: stated
-    conformance: extension
-    statement: >
-      Reported token totals are non-negative and never decrease from
-      out-of-order or repeated cumulative usage reports; deltas are derived
-      against the highest cumulative value seen per session counter.
-    intent: >
-      Operators use totals for budget decisions; double counting or negative
-      dips would make them meaningless.
-    prevents:
-      - Double-counting usage when the runtime repeats cumulative totals.
-      - Negative or regressing displayed totals.
     evidence:
+      - evidence.orchestrator-code
+      - evidence.test-reconciliation
+    statement: >
+      A Claim is released as soon as its Work Item reaches a terminal state, leaves
+      the active states, stops being routed to this deployment, or stops being visible.
+    intent: >
+      Board state is authoritative. A claim that outlives eligibility is capacity
+      spent on work nobody wants.
+    prevents:
+      - An agent continuing to work on a closed item.
+      - Capacity held by items that were reassigned away.
+      - Workspaces accumulating for work that ended.
+    verification:
+      - Close a running item and verify the run stops and the claim is released.
+      - Move a running item out of the active states and verify the claim is released.
+      - Remove a required label from a running item and verify the claim is released.
+      - Fail the reconciling read and verify no claim is released.
+
+  - id: invariant.retry-backoff-bounded
+    name: Retry Delay Grows and Is Capped
+    basis: stated
+    evidence:
+      - evidence.orchestrator-code
+      - evidence.test-retry-backoff
+    statement: >
+      Consecutive failures for one Claim produce non-decreasing delays that never
+      exceed the configured ceiling, and at most one retry is pending per item.
+    intent: >
+      Immediate retries turn a failing dependency into a denial of service, and an
+      uncapped curve turns a transient failure into an outage.
+    prevents:
+      - Hammering an unavailable work source or worker host.
+      - A retry delay growing without bound and stalling recovery.
+      - Stale retry signals starting duplicate runs.
+    verification:
+      - Fail a run repeatedly and verify each delay is at least the previous one.
+      - Fail a run many times and verify no delay exceeds the configured ceiling.
+      - Schedule a new retry over a pending one and verify only the newer one fires.
+      - Deliver a superseded retry signal and verify it starts no run.
+
+  - id: invariant.blocked-item-not-retried
+    name: A Blocked Item Is Held, Not Retried
+    basis: stated
+    evidence:
+      - evidence.orchestrator-code
+      - evidence.readme-implementation
+      - evidence.test-blocking
+    statement: >
+      A Work Item whose agent is awaiting an operator decision holds its Claim, has
+      no active run, and has no pending retry until it stops qualifying.
+    intent: >
+      Retrying work that cannot proceed without a human wastes capacity and hides the
+      pending decision from the operator.
+    prevents:
+      - A retry loop on an approval the agent cannot grant itself.
+      - Another run picking up an item that is already waiting on a human.
+      - The pending request being invisible to the operator.
+    verification:
+      - Make the agent request input and verify the item blocks with no pending retry.
+      - Verify the blocked item is not dispatched while it stays blocked.
+      - Verify the reason for blocking is present in the runtime state.
+
+  - id: invariant.last-known-good-configuration
+    name: Only a Valid Configuration Is Ever Effective
+    basis: stated
+    evidence:
+      - evidence.workflow-store-code
+      - evidence.readme-implementation
+      - evidence.test-config-reload
+    statement: >
+      The effective configuration is always a version that passed validation. An
+      invalid version neither starts the subject nor replaces a running one.
+    intent: >
+      Configuration is edited while agents are mid-run. A typo must not take down a
+      working deployment or silently change scheduling policy.
+    prevents:
+      - A half-parsed document producing undefined scheduling behavior.
+      - A running deployment losing its settings because of an editing mistake.
+      - A subject starting with settings it could not validate.
+    verification:
+      - Start with an invalid document and verify the subject does not start.
+      - Invalidate the document while running and verify prior settings stay effective.
+      - Invalidate the document while running and verify the failure is reported.
+      - Repair the document and verify the new settings become effective without restart.
+
+  - id: invariant.token-totals-monotonic
+    name: Reported Usage Never Decreases Within a Run
+    basis: stated
+    evidence:
+      - evidence.token-accounting-doc
+      - evidence.orchestrator-code
       - evidence.test-token-accounting
+    statement: >
+      Cumulative usage reported for an Agent Run is non-decreasing, and an
+      incremental report is never added on top of a cumulative one for the same usage.
+    intent: >
+      Usage is the operator's only measure of what a run costs. A total that drops or
+      double counts makes cost impossible to reason about.
+    prevents:
+      - A per-turn figure being mistaken for a session total and stalling the count.
+      - The same usage being counted once as a total and again as an increment.
+      - Totals resetting when a new turn starts on the same session.
     verification:
-      - Replay cumulative usage reports out of order and verify totals only grow by true deltas.
-      - Send delta-only reports without cumulative totals and verify they are ignored.
+      - Report a cumulative total, then a smaller one, and verify the total does not drop.
+      - Report a cumulative total and its increment and verify the increment is not added.
+      - Start a further turn on the same session and verify totals continue rather than reset.
+
+  - id: invariant.run-does-not-hop-hosts
+    name: A Run Stays on One Execution Location
+    conformance: extension
+    basis: stated
+    evidence:
+      - evidence.agent-runner-code
+      - evidence.test-remote-worker
+    statement: >
+      One Agent Run prepares its workspace and runs its session on a single execution
+      location, and a failure never moves the same run to another location.
+    intent: >
+      Work in progress lives in the workspace. Moving a run to another host abandons
+      that work and hides the failure of the original host.
+    prevents:
+      - A retry starting from an empty workspace on a different machine.
+      - A host failure being masked by silent migration.
+      - Two hosts holding divergent workspaces for one item.
+    verification:
+      - Fail a run on one host and verify the retry does not start on another host.
+      - Verify a run's workspace and session report the same execution location.
+      - Retry an item whose host still has capacity and verify the same host is chosen.

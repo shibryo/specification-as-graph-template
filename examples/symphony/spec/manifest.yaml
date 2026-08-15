@@ -1,13 +1,13 @@
 specification:
-  name: Symphony Issue-Driven Agent Orchestrator
+  name: Symphony
   version: 0.1.0
   status: draft
   stance: recovered
   summary: >
-    A long-running orchestration service that polls an issue tracker, claims
-    eligible work items, provisions isolated per-issue workspaces, and
-    supervises autonomous coding-agent sessions until each item leaves its
-    active tracker states. Recovered from the reference Elixir implementation.
+    Symphony turns work items on a tracker board into isolated, autonomous coding-agent
+    runs. It decides which items deserve an agent, gives each run its own workspace,
+    keeps the run going until the item leaves the active set, and surfaces progress,
+    cost, and blockage to operators.
 
 normative_language:
   must: required for conformance
@@ -30,11 +30,10 @@ entrypoints:
   - invariants.yaml
   - failures.yaml
   - implementation-defined.yaml
-  - evidence.yaml
   - reference.yaml
 
 implementation_instruction: >
-  Implement a conforming realization of this specification. Preserve normative
-  semantics and design intent. Do not infer additional constraints from the
+  Implement a conforming realization of this specification. Preserve the normative
+  semantics and the design intent. Do not infer additional constraints from the
   reference implementation. Where behavior is implementation-defined, choose a
-  reasonable mechanism that preserves all stated invariants, and document it.
+  reasonable mechanism that preserves all stated invariants.

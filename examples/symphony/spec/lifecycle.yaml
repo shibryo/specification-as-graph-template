@@ -1,61 +1,58 @@
-# Lifecycle of a Claim: the orchestrator's ownership of one issue.
-initial_state: state.unclaimed
+# Lifecycle of one Claim over a Work Item, from the subject's point of view.
+# It is not the tracker's own workflow, which the subject only reads.
+initial_state: state.eligible
 terminal_states:
   - state.released
 states:
-  - id: state.unclaimed
-    name: Unclaimed
+  - id: state.eligible
+    name: Eligible
     meaning: >
-      The issue is visible in an active tracker state but this orchestrator
-      holds no claim on it. It competes for dispatch every poll cycle.
+      The Work Item qualifies for orchestration but the subject holds no Claim on it.
   - id: state.running
     name: Running
     meaning: >
-      A claim is held and an agent run is executing in the issue's workspace.
-      The claim carries live telemetry from the session.
-  - id: state.awaiting-retry
-    name: Awaiting Retry
+      The subject holds a Claim and an Agent Run is active for the item.
+  - id: state.retry-waiting
+    name: Retry Waiting
     meaning: >
-      A claim is held with no live agent; a timer will re-validate and
-      re-dispatch the issue. Covers failure backoff, capacity waits, and the
-      continuation check after a normal run completion.
+      The subject holds a Claim, no run is active, and a further attempt is scheduled.
   - id: state.blocked
     name: Blocked
     meaning: >
-      A claim is held because the agent needs operator input or approval.
-      No timer exists; only an observed tracker-state change releases it.
+      The subject holds a Claim, no run is active, and the item awaits an operator decision.
   - id: state.released
     name: Released
     meaning: >
-      The claim is gone. The issue may re-enter as Unclaimed later if the
-      tracker makes it eligible again.
+      The subject holds no Claim. The item may become Eligible again as a fresh Claim.
 transitions:
-  - from: state.unclaimed
+  - from: state.eligible
     to: state.running
-    trigger: Dispatch admits the issue after revalidation and takes the claim.
+    trigger: The item is selected, revalidated, and an Agent Run starts for it.
   - from: state.running
-    to: state.awaiting-retry
-    trigger: The agent run exits abnormally, stalls without an input signal, or completes normally (continuation check).
+    to: state.retry-waiting
+    trigger: The run ends without carrying the item out of the active states.
   - from: state.running
     to: state.blocked
-    trigger: The run exits or stalls while the last session signal indicates required operator input or approval.
+    trigger: The run ends or stalls while the agent awaits an operator decision.
   - from: state.running
     to: state.released
-    trigger: Reconciliation observes the issue terminal, inactive, unrouted, or missing.
-  - from: state.awaiting-retry
+    trigger: The item reaches a terminal state, leaves the active states, stops being routed here, or stops being visible.
+  - from: state.retry-waiting
     to: state.running
-    trigger: The retry timer fires, revalidation passes, and capacity is free.
-  - from: state.awaiting-retry
-    to: state.awaiting-retry
-    trigger: The retry timer fires but capacity is exhausted or the refetch failed; a longer retry is scheduled.
-  - from: state.awaiting-retry
+    trigger: The delay expires, the item still qualifies, and capacity is available.
+  - from: state.retry-waiting
+    to: state.retry-waiting
+    trigger: The delay expires but capacity is unavailable or the revalidating read fails.
+  - from: state.retry-waiting
     to: state.released
-    trigger: The retry-time refetch shows the issue terminal, inactive, unrouted, or missing.
+    trigger: The item stops qualifying while the delay is pending.
   - from: state.blocked
     to: state.released
-    trigger: Reconciliation observes the blocked issue terminal, inactive, unrouted, or missing.
+    trigger: The item stops qualifying, or the subject restarts and forgets the block.
 normative:
-  - An issue holds at most one claim, in exactly one lifecycle state, at any time.
-  - Only fresh tracker state moves a claim into Released.
-  - Blocked never transitions directly back to Running; release and re-dispatch are required.
-  - Workspace removal accompanies release only when the observed tracker state is terminal.
+  - A Work Item MUST NOT be in more than one of these states at a time.
+  - Running, Retry Waiting, and Blocked all hold the Claim.
+  - Only the Released state permits a new Claim on the same item.
+  - Every transition out of Running MUST first stop the active run.
+  - A Blocked item MUST NOT transition directly to Retry Waiting.
+  - Losing the Claim record MUST make the item Eligible, never leave it orphaned.
